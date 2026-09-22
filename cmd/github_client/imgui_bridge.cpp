@@ -2,7 +2,9 @@
 #include <GLFW/glfw3.h>
 #include <moonbit.h>
 
+#include <cctype>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -180,6 +182,24 @@ static std::vector<GithubClientRow> github_client_parse_rows(
   return rows;
 }
 
+static bool github_client_contains_case_insensitive(
+  const std::string& value,
+  const std::string& query
+) {
+  if (query.empty()) {
+    return true;
+  }
+  std::string normalized_value = value;
+  std::string normalized_query = query;
+  for (char& character : normalized_value) {
+    character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+  }
+  for (char& character : normalized_query) {
+    character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+  }
+  return normalized_value.find(normalized_query) != std::string::npos;
+}
+
 static void github_client_render_activity_rows(
   const std::vector<GithubClientRow>& rows,
   int* action
@@ -203,6 +223,7 @@ extern "C" int github_client_imgui_render(
   int repository_count,
   int has_saved_token,
   uint16_t* repositories_text,
+  uint16_t* suggested_repositories_text,
   uint16_t* pull_requests_text,
   uint16_t* issues_text,
   uint16_t* sync_status_text
@@ -215,6 +236,8 @@ extern "C" int github_client_imgui_render(
   bool open_pat_popup = false;
   const std::vector<GithubClientRow> repositories =
     github_client_parse_rows(repositories_text);
+  const std::vector<GithubClientRow> suggested_repositories =
+    github_client_parse_rows(suggested_repositories_text);
   const std::vector<GithubClientRow> pull_requests =
     github_client_parse_rows(pull_requests_text);
   const std::vector<GithubClientRow> issues =
@@ -228,13 +251,13 @@ extern "C" int github_client_imgui_render(
   };
   const char* page_descriptions[] = {
     "Relevant activity from registered repositories and their dependencies.",
-    "Choose the repositories this client should monitor.",
+    "Choose repositories to watch or select one from your GitHub account.",
     "Review relevant pull requests across monitored repositories.",
     "Track relevant issues and mentions in one place.",
     "Manage authentication and application preferences."
   };
   const char* recent_titles[] = {
-    "Relevant activity", "Registered repositories", "Relevant pull requests", "Relevant issues"
+    "Relevant activity", "Watched repositories", "Relevant pull requests", "Relevant issues"
   };
   const char* empty_messages[] = {
     "Nothing relevant needs your attention.",
@@ -353,20 +376,55 @@ extern "C" int github_client_imgui_render(
       ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 190.0f);
       ImGui::InputTextWithHint(
         "##repository.register.input",
-        "owner/repository",
+        "Filter or enter owner/repository",
         github_client_repository_input,
         sizeof(github_client_repository_input)
       );
       ImGui::SameLine();
       ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
-      if (ImGui::Button("Register##repository.register", ImVec2(150.0f, 0.0f))) {
+      if (ImGui::Button("Watch##repository.register", ImVec2(150.0f, 0.0f))) {
         action = 2;
       }
       ImGui::PopStyleColor();
-      ImGui::TextDisabled("Registered: %d", repository_count);
-      ImGui::Separator();
+      ImGui::TextDisabled("Watched: %d", repository_count);
       for (const GithubClientRow& repository : repositories) {
         ImGui::BulletText("%s", repository.label.c_str());
+      }
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::TextUnformatted("Your repositories");
+      ImGui::TextDisabled("Select a repository to add it to Watched repositories.");
+      if (suggested_repositories.empty()) {
+        ImGui::TextDisabled("No repository suggestions are available for this token.");
+      }
+      for (const GithubClientRow& suggestion : suggested_repositories) {
+        if (!github_client_contains_case_insensitive(
+              suggestion.url,
+              github_client_repository_input
+            )) {
+          continue;
+        }
+        bool watched = false;
+        for (const GithubClientRow& repository : repositories) {
+          if (repository.label == suggestion.url) {
+            watched = true;
+            break;
+          }
+        }
+        const std::string label = suggestion.label +
+          (watched ? "  (Watched)" : "") + "##suggestion." + suggestion.url;
+        const ImGuiSelectableFlags flags = watched
+          ? ImGuiSelectableFlags_Disabled
+          : ImGuiSelectableFlags_None;
+        if (ImGui::Selectable(label.c_str(), false, flags, ImVec2(0.0f, 38.0f))) {
+          std::snprintf(
+            github_client_repository_input,
+            sizeof(github_client_repository_input),
+            "%s",
+            suggestion.url.c_str()
+          );
+          action = 2;
+        }
       }
     } else {
       std::vector<GithubClientRow> visible_rows;

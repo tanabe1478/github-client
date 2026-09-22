@@ -3,7 +3,7 @@
 extern "C" fn github_client_imgui_init(window : @glfw.GLFWwindow) -> Int = "github_client_imgui_init"
 
 ///|
-#borrow(window, repositories, pull_requests, issues, sync_status)
+#borrow(window, repositories, suggested_repositories, pull_requests, issues, sync_status)
 extern "C" fn github_client_imgui_render(
   window : @glfw.GLFWwindow,
   page : Int,
@@ -11,6 +11,7 @@ extern "C" fn github_client_imgui_render(
   repository_count : Int,
   has_saved_token : Int,
   repositories : String,
+  suggested_repositories : String,
   pull_requests : String,
   issues : String,
   sync_status : String,
@@ -41,6 +42,7 @@ fn imgui_render(
   repository_count : Int,
   has_saved_token : Bool,
   repositories : String,
+  suggested_repositories : String,
   pull_requests : String,
   issues : String,
   sync_status : String,
@@ -56,6 +58,7 @@ fn imgui_render(
       0
     },
     repositories,
+    suggested_repositories,
     pull_requests,
     issues,
     sync_status,

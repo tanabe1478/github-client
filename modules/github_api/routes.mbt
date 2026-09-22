@@ -7,6 +7,11 @@ pub fn authenticated_user_path() -> String {
 }
 
 ///|
+pub fn owned_repositories_path(page : Int) -> String {
+  "/user/repos?affiliation=owner&visibility=all&sort=updated&direction=desc&per_page=100&page=\{page}"
+}
+
+///|
 pub fn repository_path(owner : String, name : String) -> String {
   "/repos/\{owner}/\{name}"
 }

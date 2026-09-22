@@ -12,6 +12,19 @@ fn repository_rows(repositories : Array[@domain.RepositoryRef]) -> String {
 }
 
 ///|
+fn suggested_repository_rows(
+  repositories : Array[@github_api.RepositorySummary],
+) -> String {
+  repositories
+  .map(repository => {
+    let visibility = if repository.is_private() { "Private" } else { "Public" }
+    let archived = if repository.is_archived() { " · Archived" } else { "" }
+    "\{repository.full_name()}  · \{visibility}\{archived}\t\{repository.full_name()}"
+  })
+  .join("\n")
+}
+
+///|
 fn activity_rows(activities : Array[@github_api.ActivitySummary]) -> String {
   activities
   .map(activity => {
@@ -77,6 +90,7 @@ async fn main {
   }
   let pull_requests : Array[@github_api.ActivitySummary] = []
   let issues : Array[@github_api.ActivitySummary] = []
+  let suggested_repositories : Array[@github_api.RepositorySummary] = []
   let mut authenticated_login = ""
   let mut saved_token : String? = None
   let mut sync_status = "Add a token to load GitHub activity."
@@ -88,6 +102,18 @@ async fn main {
           saved_token = Some(token)
           sync_status = "Connected as @\{authenticated_login}."
           println("github-authenticated: \{authenticated_login}")
+          match @github_api.list_owned_repositories(token) {
+            Ok(repositories) => {
+              println(
+                "github-repositories: suggestions=\{repositories.length()}",
+              )
+              suggested_repositories.append(repositories)
+            }
+            Err(error) => {
+              sync_status = "Repository suggestions: \{error}"
+              println("github-repositories: \{error}")
+            }
+          }
           for repository in model.repositories() {
             match
               fetch_repository_activity(
@@ -142,6 +168,7 @@ async fn main {
       model.repositories().length(),
       has_saved_token,
       repository_rows(model.repositories()),
+      suggested_repository_rows(suggested_repositories),
       activity_rows(pull_requests),
       activity_rows(issues),
       sync_status,
@@ -194,6 +221,16 @@ async fn main {
                 sync_status = "Connected as @\{authenticated_login}."
                 pull_requests.clear()
                 issues.clear()
+                suggested_repositories.clear()
+                match @github_api.list_owned_repositories(token) {
+                  Ok(repositories) => {
+                    println(
+                      "github-repositories: suggestions=\{repositories.length()}",
+                    )
+                    suggested_repositories.append(repositories)
+                  }
+                  Err(error) => sync_status = "Repository suggestions: \{error}"
+                }
                 for repository in model.repositories() {
                   match
                     fetch_repository_activity(
