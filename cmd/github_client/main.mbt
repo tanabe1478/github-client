@@ -30,20 +30,20 @@ fn main {
         println("ui-action: auth.sign-in count=\{model.sign_in_requests()}")
       }
       10 => {
+        model = @app.update(model, @app.Msg::Navigate(@app.Page::Inbox))
+        println("ui-action: nav.inbox")
+      }
+      11 => {
         model = @app.update(model, @app.Msg::Navigate(@app.Page::Repositories))
         println("ui-action: nav.repositories")
       }
-      11 => {
+      12 => {
         model = @app.update(model, @app.Msg::Navigate(@app.Page::PullRequests))
         println("ui-action: nav.pull-requests")
       }
-      12 => {
+      13 => {
         model = @app.update(model, @app.Msg::Navigate(@app.Page::Issues))
         println("ui-action: nav.issues")
-      }
-      13 => {
-        model = @app.update(model, @app.Msg::Navigate(@app.Page::Actions))
-        println("ui-action: nav.actions")
       }
       _ => ()
     }

@@ -1,9 +1,9 @@
 ///|
 pub(all) enum Page {
+  Inbox
   Repositories
   PullRequests
   Issues
-  Actions
 }
 
 ///|
@@ -20,7 +20,7 @@ pub struct Model {
 
 ///|
 pub fn Model::new() -> Model {
-  { page: Repositories, sign_in_requests: 0, }
+  { page: Inbox, sign_in_requests: 0, }
 }
 
 ///|
@@ -45,19 +45,19 @@ pub fn update(model : Model, msg : Msg) -> Model {
 ///|
 pub fn Page::code(self : Page) -> Int {
   match self {
-    Repositories => 0
-    PullRequests => 1
-    Issues => 2
-    Actions => 3
+    Inbox => 0
+    Repositories => 1
+    PullRequests => 2
+    Issues => 3
   }
 }
 
 ///|
 pub fn Page::name(self : Page) -> String {
   match self {
+    Inbox => "Inbox"
     Repositories => "Repositories"
     PullRequests => "PullRequests"
     Issues => "Issues"
-    Actions => "Actions"
   }
 }

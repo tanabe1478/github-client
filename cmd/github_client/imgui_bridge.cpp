@@ -111,22 +111,22 @@ extern "C" int github_client_imgui_render(
     page = 0;
   }
   const char* page_titles[] = {
-    "Repositories", "Pull requests", "Issues", "Actions"
+    "Inbox", "Repositories", "Pull requests", "Issues"
   };
   const char* page_descriptions[] = {
-    "Browse and manage repositories from your GitHub account.",
-    "Review pull requests across repositories.",
-    "Track issues assigned to you and your teams.",
-    "Monitor workflow runs and their status."
+    "Relevant activity from registered repositories and their dependencies.",
+    "Choose the repositories this client should monitor.",
+    "Review relevant pull requests across monitored repositories.",
+    "Track relevant issues and mentions in one place."
   };
   const char* recent_titles[] = {
-    "Recent repositories", "Recent pull requests", "Recent issues", "Recent workflow runs"
+    "Relevant activity", "Registered repositories", "Relevant pull requests", "Relevant issues"
   };
   const char* empty_messages[] = {
-    "No repositories loaded yet.",
-    "No pull requests loaded yet.",
-    "No issues loaded yet.",
-    "No workflow runs loaded yet."
+    "Nothing relevant needs your attention.",
+    "No repositories registered yet.",
+    "No relevant pull requests found.",
+    "No relevant issues found."
   };
   ImGuiIO& io = ImGui::GetIO();
   ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
@@ -165,19 +165,19 @@ extern "C" int github_client_imgui_render(
   ImGui::Dummy(ImVec2(0.0f, 8.0f));
   ImGui::TextDisabled("  NAVIGATION");
   ImGui::Spacing();
-  if (ImGui::Selectable("  Repositories##nav.repositories", page == 0, 0,
+  if (ImGui::Selectable("  Inbox##nav.inbox", page == 0, 0,
                         ImVec2(0.0f, 44.0f))) {
     action = 10;
   }
-  if (ImGui::Selectable("  Pull requests##nav.pull-requests", page == 1, 0,
+  if (ImGui::Selectable("  Repositories##nav.repositories", page == 1, 0,
                         ImVec2(0.0f, 44.0f))) {
     action = 11;
   }
-  if (ImGui::Selectable("  Issues##nav.issues", page == 2, 0,
+  if (ImGui::Selectable("  Pull requests##nav.pull-requests", page == 2, 0,
                         ImVec2(0.0f, 44.0f))) {
     action = 12;
   }
-  if (ImGui::Selectable("  Actions##nav.actions", page == 3, 0,
+  if (ImGui::Selectable("  Issues##nav.issues", page == 3, 0,
                         ImVec2(0.0f, 44.0f))) {
     action = 13;
   }

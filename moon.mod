@@ -4,7 +4,6 @@ version = "0.1.0"
 
 import {
   "mizchi/glfw@0.2.3",
-  "mizchi/github@0.1.4",
   "moonbitstack/moonegui@0.2.0",
   "moonbit-community/proton_safe_storage@0.3.3",
   "moonbit-community/proton_shell@0.3.3",

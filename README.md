@@ -19,11 +19,13 @@ GLFWを製品window hostとして採用し、OpenGL 3 + Dear ImGuiを接続す�
 - GUI: Dear ImGui公式GLFW backend（Material UIを基準にした独自theme）
 - Native renderer: OpenGL 3（初期経路）
 - UI verification: Pure MoonBit state test + application semantic registry + screenshot
-- GitHub API: `mizchi/github`
+- GitHub API: 必要なREST endpointだけを`github_api/`へ実装
 - Async runtime: `moonbitlang/async`
 - Secure token storage: `moonbit-community/proton_safe_storage`
 - Open external URLs: `moonbit-community/proton_shell`
 - Packaging: `moonbit-community/proton_package`
+
+登録repository、mention、dependency activityの関連付けは[Product scope](docs/product-scope.md)を参照してください。
 
 Kaguraはゲームエンジンなので採用しません。特定作者に寄せず、MoonBitコミュニティ全体のパッケージを比較します。
 

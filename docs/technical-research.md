@@ -18,7 +18,7 @@
 | Window/input | [`mizchi/glfw`](https://github.com/mizchi/glfw-mbt) | 採用。Windows runtime smokeは実機で成功 |
 | GUI | [Dear ImGui](https://github.com/ocornut/imgui) | 採用。公式GLFW/OpenGL backendと一般環境での豊富な実績を優先 |
 | Native rendering | OpenGL 3 | 採用。GLFWがcontext lifecycleを直接提供し、最初の統合範囲が小さい |
-| GitHub REST API | [`mizchi/github`](https://github.com/mizchi/github) | 採用候補。クライアントを新規実装する必要はほぼない |
+| GitHub REST API | アプリ内の最小client | 採用。必要なendpointとresponse型だけを実装する |
 | 一般HTTP | [`oboard/reqbest`](https://github.com/oboard/reqbest) | GitHub APIクライアントで足りない認証等の補助候補 |
 | JSON | `moonbitlang/core/json` | 採用 |
 | OAuth | GitHub Device Flowを小さく実装 | 既存OAuth2ライブラリにはDevice Flowがない |
@@ -159,24 +159,19 @@ Pure MoonBitのimmediate-mode GUI。headless coreが描画から分離されて�
 
 ## 2. HTTP・JSON・GitHub API層
 
-### 2.1 `mizchi/github`
+### 2.1 アプリ内の最小GitHub client
 
-GitHub REST API clientが既に存在する。native target向けで、`moonbitlang/async`のHTTP/TLS/socket上に実装されている。
+`mizchi/github`の包括的SDKには依存しない。このプロダクトは登録repositoryを中心とした関連activity inboxであり、必要なendpointが限定されるためである。
 
-既存API:
+初期API surface:
 
-- client: GET/POST/PUT/PATCH/DELETE、binary、pagination、rate limit
-- users: authenticated user / user取得
-- repos: repository、content、branch、tag、release
-- issues: list/get/create/update、label、comment
-- pulls: list/get/create/update、files、reviews、reviewer request、merge
-- actions/checks/statuses/search/git APIs
+- authenticated user
+- notifications
+- 登録repository情報
+- 登録repositoryのopen issue / pull request
+- dependency graph SBOM
 
-判断:
-
-- GitHub API層の第一候補として使う。
-- MVPのrepository/issue/PR表示に必要な大部分が揃っている。
-- 通知、star、organization等の不足APIは、本アプリ内に閉じず再利用可能ならupstream contributionを検討する。
+endpoint pathとresponse型を`github_api/`へ追加し、pagination、rate limit、ETag、conditional requestも利用する機能に必要な範囲だけ実装する。詳細は[Product scope](product-scope.md)を参照する。
 
 ### 2.2 `oboard/reqbest`
 
@@ -188,9 +183,9 @@ MoonBit nativeのasync HTTP client。
 
 判断:
 
-- GitHub APIには`mizchi/github`を優先する。
-- Device Flowなど`mizchi/github`の責務外となるendpointを実装する際の候補。
-- 依存と接続poolを二重化しないよう、最終的には`moonbitlang/async/http`へ揃える選択肢も比較する。
+- 最小GitHub clientのHTTP transport候補。
+- Device Flowを含め、接続poolを二重化せず同じtransportへ統一する。
+- 実装前に`moonbitlang/async/http`を直接使う場合との差を小さな接続spikeで比較する。
 
 ### 2.3 JSON
 
@@ -198,7 +193,7 @@ MoonBit nativeのasync HTTP client。
 
 ### 2.4 非同期処理
 
-`mizchi/github`と`reqbest`はいずれも`moonbitlang/async`を利用する。GLFWはmain thread上のpoll/render loopを要求するため、次をスパイクで確認する。
+GitHub clientのHTTP処理には`moonbitlang/async`を利用する。GLFWはmain thread上のpoll/render loopを要求するため、次をスパイクで確認する。
 
 - async mainの中でGLFW event loopを駆動できるか。
 - 毎frame cooperative yieldしてnetwork taskを進められるか。
@@ -323,7 +318,7 @@ Windowsではcurrent-user/per-machine/bothのNSIS install mode、payload、short
 2. **OpenGL context smoke**: GLFW windowでOpenGL 3 contextを作りbuffer swapする。
 3. **Dear ImGui smoke**: 公式GLFW/OpenGL backendでdemo、button、scroll、text inputを描画する。
 4. **Semantic smoke**: stable IDでbuttonを操作し、stateとsemantic snapshotを検証する。
-5. **Async smoke**: 描画を止めずに`mizchi/github`でauthenticated userを取得する。
+5. **Async smoke**: 描画を止めずに最小GitHub clientでauthenticated userを取得する。
 6. **Auth storage smoke**: PATをDPAPIで暗号化・再読込・削除する。
 7. **Vertical slice**: repository listを取得し、Dear ImGui tableとして表示する。
 8. **Package smoke**: portable zipを別のWindows環境で起動する。
@@ -338,7 +333,6 @@ Windowsではcurrent-user/per-machine/bothのNSIS install mode、payload、short
 - https://github.com/lb091188/moonbit-libyue
 - https://github.com/moonbit-community/wgpu-mbt
 - https://github.com/LING71671/moon-egui
-- https://github.com/mizchi/github
 - https://github.com/oboard/reqbest
 - https://github.com/ryota0624/moonbit_oauth2
 - https://github.com/moonbit-community/proton/tree/main/sys/safe_storage
