@@ -8,6 +8,15 @@ test "navigation preserves sign-in state" {
 }
 
 ///|
+test "settings navigation preserves application state" {
+  let repository = RepositoryRef::new("tanabe1478", "github-client")
+  let registered = update(Model::new(), Msg::RegisterRepository(repository))
+  let settings = update(registered, Msg::Navigate(Page::Settings))
+  inspect(settings.page().name(), content="Settings")
+  inspect(settings.repositories().length(), content="1")
+}
+
+///|
 test "sign-in requests are counted" {
   let initial = Model::new()
   let once = update(initial, Msg::RequestSignIn)

@@ -58,10 +58,10 @@ try {
   }
   Save-WindowScreenshot $Process $Rect (Join-Path $ArtifactPath "before.png")
 
-  # Coordinates are relative to the captured application window. They target
-  # the center of the Material-style Sign in to GitHub button.
+  # Authentication controls live only on Settings. Verify that the native
+  # navigation reaches that page; PAT entry itself remains masked.
   $null = [GithubClientInteraction]::SetForegroundWindow($Process.MainWindowHandle)
-  $null = [GithubClientInteraction]::SetCursorPos($Rect.Left + 375, $Rect.Top + 320)
+  $null = [GithubClientInteraction]::SetCursorPos($Rect.Left + 100, $Rect.Top + 430)
   [GithubClientInteraction]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
   [GithubClientInteraction]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Seconds 2
@@ -72,8 +72,8 @@ try {
   $null = $Process.CloseMainWindow()
   $null = $Process.WaitForExit(3000)
   [string]$OutputText = if (Test-Path $StdoutPath) { Get-Content $StdoutPath -Raw } else { "" }
-  if (-not $OutputText.Contains("ui-action: auth.sign-in count=1")) {
-    throw "The expected MoonBit UI action was not observed. See $ArtifactPath."
+  if (-not $OutputText.Contains("ui-action: nav.settings")) {
+    throw "The expected MoonBit Settings navigation was not observed. See $ArtifactPath."
   }
   Write-Host "Interaction smoke passed. Artifacts: $ArtifactPath"
 } finally {

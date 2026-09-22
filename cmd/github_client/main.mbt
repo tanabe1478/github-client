@@ -250,6 +250,13 @@ async fn main {
         )
         println("ui-action: nav.issues")
       }
+      14 => {
+        model = @domain.update(
+          model,
+          @domain.Msg::Navigate(@domain.Page::Settings),
+        )
+        println("ui-action: nav.settings")
+      }
       _ => ()
     }
     @glfw.swap_buffers(window)

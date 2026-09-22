@@ -220,17 +220,18 @@ extern "C" int github_client_imgui_render(
   const std::vector<GithubClientRow> issues =
     github_client_parse_rows(issues_text);
   const std::string sync_status = github_client_utf16_to_utf8(sync_status_text);
-  if (page < 0 || page > 3) {
+  if (page < 0 || page > 4) {
     page = 0;
   }
   const char* page_titles[] = {
-    "Inbox", "Repositories", "Pull requests", "Issues"
+    "Inbox", "Repositories", "Pull requests", "Issues", "Settings"
   };
   const char* page_descriptions[] = {
     "Relevant activity from registered repositories and their dependencies.",
     "Choose the repositories this client should monitor.",
     "Review relevant pull requests across monitored repositories.",
-    "Track relevant issues and mentions in one place."
+    "Track relevant issues and mentions in one place.",
+    "Manage authentication and application preferences."
   };
   const char* recent_titles[] = {
     "Relevant activity", "Registered repositories", "Relevant pull requests", "Relevant issues"
@@ -294,6 +295,13 @@ extern "C" int github_client_imgui_render(
                         ImVec2(0.0f, 44.0f))) {
     action = 13;
   }
+  ImGui::Spacing();
+  ImGui::Separator();
+  ImGui::Spacing();
+  if (ImGui::Selectable("  Settings##nav.settings", page == 4, 0,
+                        ImVec2(0.0f, 44.0f))) {
+    action = 14;
+  }
   ImGui::EndChild();
 
   ImGui::SetCursorPos(ImVec2(264.0f, 92.0f));
@@ -307,76 +315,77 @@ extern "C" int github_client_imgui_render(
   ImGui::Dummy(ImVec2(0.0f, 10.0f));
 
   const float card_width = ImGui::GetContentRegionAvail().x;
-  ImGui::BeginChild("##welcome.card", ImVec2(card_width, 210.0f),
-                    ImGuiChildFlags_Borders);
-  ImGui::TextUnformatted(
-    has_saved_token ? "GitHub credential is protected" : "Connect your GitHub account"
-  );
-  ImGui::Spacing();
-  ImGui::TextWrapped(
-    has_saved_token
-      ? "A personal access token is encrypted with the operating system credential store."
-      : "Add a fine-grained personal access token. It is encrypted before being written to disk."
-  );
-  ImGui::Dummy(ImVec2(0.0f, 12.0f));
-  ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
-  const char* credential_button = has_saved_token
-    ? "Replace token##auth.sign-in"
-    : "Add token##auth.sign-in";
-  if (ImGui::Button(credential_button, ImVec2(174.0f, 42.0f))) {
-    open_pat_popup = true;
-    action = 1;
-  }
-  ImGui::PopStyleColor();
-  ImGui::SameLine();
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextDisabled("Interaction count: %d", sign_in_requests);
-  if (!sync_status.empty()) {
-    ImGui::TextDisabled("%s", sync_status.c_str());
-  }
-  ImGui::EndChild();
-
-  ImGui::Dummy(ImVec2(0.0f, 12.0f));
-  ImGui::BeginChild("##recent.card", ImGui::GetContentRegionAvail(),
-                    ImGuiChildFlags_Borders);
-  ImGui::TextUnformatted(recent_titles[page]);
-  ImGui::Separator();
-  if (page == 1) {
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 190.0f);
-    ImGui::InputTextWithHint(
-      "##repository.register.input",
-      "owner/repository",
-      github_client_repository_input,
-      sizeof(github_client_repository_input)
+  if (page == 4) {
+    ImGui::BeginChild("##credential.card", ImVec2(card_width, 210.0f),
+                      ImGuiChildFlags_Borders);
+    ImGui::TextUnformatted(
+      has_saved_token ? "GitHub credential is protected" : "Connect your GitHub account"
     );
-    ImGui::SameLine();
+    ImGui::Spacing();
+    ImGui::TextWrapped(
+      has_saved_token
+        ? "A personal access token is encrypted with the operating system credential store."
+        : "Add a fine-grained personal access token. It is encrypted before being written to disk."
+    );
+    ImGui::Dummy(ImVec2(0.0f, 12.0f));
     ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
-    if (ImGui::Button("Register##repository.register", ImVec2(150.0f, 0.0f))) {
-      action = 2;
+    const char* credential_button = has_saved_token
+      ? "Replace token##auth.sign-in"
+      : "Add token##auth.sign-in";
+    if (ImGui::Button(credential_button, ImVec2(174.0f, 42.0f))) {
+      open_pat_popup = true;
+      action = 1;
     }
     ImGui::PopStyleColor();
-    ImGui::TextDisabled("Registered: %d", repository_count);
-    ImGui::Separator();
-    for (const GithubClientRow& repository : repositories) {
-      ImGui::BulletText("%s", repository.label.c_str());
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("Interaction count: %d", sign_in_requests);
+    if (!sync_status.empty()) {
+      ImGui::TextDisabled("%s", sync_status.c_str());
     }
+    ImGui::EndChild();
   } else {
-    std::vector<GithubClientRow> visible_rows;
-    if (page == 0) {
-      visible_rows.insert(visible_rows.end(), pull_requests.begin(), pull_requests.end());
-      visible_rows.insert(visible_rows.end(), issues.begin(), issues.end());
-    } else if (page == 2) {
-      visible_rows = pull_requests;
-    } else if (page == 3) {
-      visible_rows = issues;
-    }
-    if (visible_rows.empty()) {
-      ImGui::TextDisabled("%s", empty_messages[page]);
+    ImGui::BeginChild("##activity.card", ImGui::GetContentRegionAvail(),
+                      ImGuiChildFlags_Borders);
+    ImGui::TextUnformatted(recent_titles[page]);
+    ImGui::Separator();
+    if (page == 1) {
+      ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 190.0f);
+      ImGui::InputTextWithHint(
+        "##repository.register.input",
+        "owner/repository",
+        github_client_repository_input,
+        sizeof(github_client_repository_input)
+      );
+      ImGui::SameLine();
+      ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
+      if (ImGui::Button("Register##repository.register", ImVec2(150.0f, 0.0f))) {
+        action = 2;
+      }
+      ImGui::PopStyleColor();
+      ImGui::TextDisabled("Registered: %d", repository_count);
+      ImGui::Separator();
+      for (const GithubClientRow& repository : repositories) {
+        ImGui::BulletText("%s", repository.label.c_str());
+      }
     } else {
-      github_client_render_activity_rows(visible_rows, &action);
+      std::vector<GithubClientRow> visible_rows;
+      if (page == 0) {
+        visible_rows.insert(visible_rows.end(), pull_requests.begin(), pull_requests.end());
+        visible_rows.insert(visible_rows.end(), issues.begin(), issues.end());
+      } else if (page == 2) {
+        visible_rows = pull_requests;
+      } else if (page == 3) {
+        visible_rows = issues;
+      }
+      if (visible_rows.empty()) {
+        ImGui::TextDisabled("%s", empty_messages[page]);
+      } else {
+        github_client_render_activity_rows(visible_rows, &action);
+      }
     }
+    ImGui::EndChild();
   }
-  ImGui::EndChild();
   ImGui::EndChild();
   ImGui::End();
 
