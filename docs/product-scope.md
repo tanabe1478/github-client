@@ -36,7 +36,7 @@
 初期endpoint:
 
 - `GET /user`
-- `GET /notifications`
+- `GET /search/issues`（Fine-grained PATで取得可能なmention/relevance query）
 - `GET /repos/{owner}/{repo}`
 - `GET /repos/{owner}/{repo}/issues`
 - `GET /repos/{owner}/{repo}/pulls`
@@ -47,10 +47,11 @@
 ## Delivery order
 
 1. repositoryを手動登録してlocal保存 **完了**
-2. PATを使った`GET /user`接続
-3. 登録repositoryのissue/pull取得
-4. notification/mentionを統合したInbox
-5. SBOMからdependency候補を抽出
-6. dependency repositoryの関連判定
-7. polling、既読、desktop notification
-8. Device Flowとsecure token storage
+2. PATをアプリ画面からDPAPI/Keychainで暗号化保存 **完了**
+3. 保存したPATを使った`GET /user`接続
+4. 登録repositoryのissue/pull取得
+5. searchによるmentionを統合したInbox
+6. SBOMからdependency候補を抽出
+7. dependency repositoryの関連判定
+8. polling、既読、desktop notification
+9. Device Flowへの移行

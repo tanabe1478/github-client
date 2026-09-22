@@ -17,6 +17,7 @@ fn main {
   }
 
   let mut model = @domain.Model::new()
+  let mut has_saved_token = @credential_store.has_saved_token()
   match @repository_store.load_default() {
     Ok(repositories) =>
       for repository in repositories {
@@ -34,6 +35,7 @@ fn main {
       model.page().code(),
       model.sign_in_requests(),
       model.repositories().length(),
+      has_saved_token,
     )
     match action {
       1 => {
@@ -53,6 +55,14 @@ fn main {
             }
           }
           Err(error) => println("repository-register: \{error}")
+        }
+      3 =>
+        match @credential_store.save_token(imgui_take_token()) {
+          Ok(_) => {
+            has_saved_token = true
+            println("ui-action: auth.pat-saved")
+          }
+          Err(error) => println("credential-store: save failed: \{error}")
         }
       10 => {
         model = @domain.update(

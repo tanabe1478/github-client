@@ -101,12 +101,14 @@ extern "C" int github_client_imgui_init(GLFWwindow* window) {
 }
 
 static char github_client_repository_input[256] = "";
+static char github_client_token_input[512] = "";
 
 extern "C" int github_client_imgui_render(
   GLFWwindow* window,
   int page,
   int sign_in_requests,
-  int repository_count
+  int repository_count,
+  int has_saved_token
 ) {
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplGlfw_NewFrame();
@@ -202,15 +204,22 @@ extern "C" int github_client_imgui_render(
   const float card_width = ImGui::GetContentRegionAvail().x;
   ImGui::BeginChild("##welcome.card", ImVec2(card_width, 226.0f),
                     ImGuiChildFlags_Borders);
-  ImGui::TextUnformatted("Connect your GitHub account");
+  ImGui::TextUnformatted(
+    has_saved_token ? "GitHub credential is protected" : "Connect your GitHub account"
+  );
   ImGui::Spacing();
   ImGui::TextWrapped(
-    "Sign in to load repositories, pull requests, issues, and workflow runs. "
-    "Authentication will use GitHub Device Flow."
+    has_saved_token
+      ? "A personal access token is encrypted with the operating system credential store."
+      : "Add a fine-grained personal access token. It is encrypted before being written to disk."
   );
   ImGui::Dummy(ImVec2(0.0f, 12.0f));
   ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
-  if (ImGui::Button("Sign in to GitHub##auth.sign-in", ImVec2(174.0f, 42.0f))) {
+  const char* credential_button = has_saved_token
+    ? "Replace token##auth.sign-in"
+    : "Add token##auth.sign-in";
+  if (ImGui::Button(credential_button, ImVec2(174.0f, 42.0f))) {
+    ImGui::OpenPopup("Personal access token##auth.pat-dialog");
     action = 1;
   }
   ImGui::PopStyleColor();
@@ -246,6 +255,39 @@ extern "C" int github_client_imgui_render(
   ImGui::EndChild();
   ImGui::End();
 
+  ImGui::SetNextWindowSize(ImVec2(560.0f, 0.0f), ImGuiCond_Appearing);
+  if (ImGui::BeginPopupModal(
+        "Personal access token##auth.pat-dialog",
+        nullptr,
+        ImGuiWindowFlags_AlwaysAutoResize
+      )) {
+    ImGui::TextWrapped(
+      "The token stays masked and is encrypted with Windows DPAPI before storage."
+    );
+    ImGui::Spacing();
+    ImGui::SetNextItemWidth(520.0f);
+    ImGui::InputTextWithHint(
+      "##auth.pat-input",
+      "github_pat_...",
+      github_client_token_input,
+      sizeof(github_client_token_input),
+      ImGuiInputTextFlags_Password
+    );
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
+    if (ImGui::Button("Save securely##auth.pat-save", ImVec2(160.0f, 40.0f))) {
+      action = 3;
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::PopStyleColor();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel##auth.pat-cancel", ImVec2(110.0f, 40.0f))) {
+      github_client_token_input[0] = '\0';
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+
   ImGui::Render();
   int width = 0;
   int height = 0;
@@ -266,6 +308,18 @@ extern "C" moonbit_string_t github_client_imgui_take_repository(void) {
     );
   }
   github_client_repository_input[0] = '\0';
+  return result;
+}
+
+extern "C" moonbit_string_t github_client_imgui_take_token(void) {
+  const size_t length = std::strlen(github_client_token_input);
+  moonbit_string_t result = moonbit_make_string(length, 0);
+  for (size_t index = 0; index < length; ++index) {
+    result[index] = static_cast<uint16_t>(
+      static_cast<unsigned char>(github_client_token_input[index])
+    );
+  }
+  std::memset(github_client_token_input, 0, sizeof(github_client_token_input));
   return result;
 }
 

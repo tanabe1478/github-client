@@ -53,27 +53,14 @@ pub fn save(
 }
 
 ///|
-pub fn default_path() -> Result[(String, String), String] {
-  match @env.get_env_var("LOCALAPPDATA") {
-    Some(root) => {
-      let directory = root + "\\MoonBitGitHubClient"
-      Ok((directory, directory + "\\repositories.txt"))
-    }
-    None =>
-      match @env.get_env_var("HOME") {
-        Some(home) => {
-          let directory = home + "/.config/moonbit-github-client"
-          Ok((directory, directory + "/repositories.txt"))
-        }
-        None => Err("LOCALAPPDATA and HOME are unavailable")
-      }
-  }
+fn default_path() -> Result[String, String] {
+  @app_paths.data_file("repositories.txt")
 }
 
 ///|
 pub fn load_default() -> Result[Array[@domain.RepositoryRef], String] {
   match default_path() {
-    Ok((_, path)) => load(path)
+    Ok(path) => load(path)
     Err(error) => Err(error)
   }
 }
@@ -82,13 +69,11 @@ pub fn load_default() -> Result[Array[@domain.RepositoryRef], String] {
 pub fn save_default(
   repositories : Array[@domain.RepositoryRef],
 ) -> Result[Unit, String] {
-  guard default_path() is Ok((directory, path)) else {
-    return Err("repository store path is unavailable")
+  guard @app_paths.ensure_data_directory() is Ok(_) else {
+    return Err("application data directory is unavailable")
   }
-  if !@fs.path_exists(directory) {
-    @fs.create_dir(directory) catch {
-      _ => return Err("failed to create repository store directory")
-    }
+  guard default_path() is Ok(path) else {
+    return Err("repository store path is unavailable")
   }
   save(path, repositories)
 }

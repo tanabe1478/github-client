@@ -33,10 +33,12 @@ Kaguraはゲームエンジンなので採用しません。特定作者に寄�
 
 - `modules/domain`: Pureなproduct modelとrelevance rule
 - `modules/github_api`: 最小GitHub API surface
+- `modules/app_paths`: OS別application data path
+- `modules/credential_store`: DPAPI/KeychainによるPAT暗号化保存
 - `modules/repository_store`: 登録repositoryのfilesystem persistence
 - `cmd/github_client`: desktop composition root
 
-module間の循環参照は禁止し、`repository_store → domain`以外はcomposition rootからのみ参照します。
+module間の循環参照は禁止し、依存方向は[Module boundaries](docs/module-boundaries.md)で固定します。
 
 ## Windows bootstrap
 

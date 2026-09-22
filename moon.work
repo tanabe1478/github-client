@@ -1,5 +1,7 @@
 members = [
   ".",
+  "modules/app_paths",
+  "modules/credential_store",
   "modules/domain",
   "modules/github_api",
   "modules/repository_store",

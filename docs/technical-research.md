@@ -166,7 +166,7 @@ Pure MoonBitのimmediate-mode GUI。headless coreが描画から分離されて�
 初期API surface:
 
 - authenticated user
-- notifications
+- issue searchによるmentionと関連activity
 - 登録repository情報
 - 登録repositoryのopen issue / pull request
 - dependency graph SBOM

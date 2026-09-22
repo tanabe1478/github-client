@@ -1,7 +1,7 @@
 import {
+  "moonbit-community/proton_safe_storage" @safe_storage,
   "moonbitlang/x/fs",
   "tanabe1478/github-client-app-paths" @app_paths,
-  "tanabe1478/github-client-domain" @domain,
 }
 
 supported_targets = "native"

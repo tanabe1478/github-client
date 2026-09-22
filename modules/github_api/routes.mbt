@@ -7,11 +7,6 @@ pub fn authenticated_user_path() -> String {
 }
 
 ///|
-pub fn notifications_path() -> String {
-  "/notifications?all=false&participating=false&per_page=50"
-}
-
-///|
 pub fn repository_path(owner : String, name : String) -> String {
   "/repos/\{owner}/\{name}"
 }
