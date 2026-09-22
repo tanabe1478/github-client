@@ -1,0 +1,7 @@
+import {
+  "moonbitlang/core/env",
+  "moonbitlang/x/fs",
+  "tanabe1478/github-client-domain" @domain,
+}
+
+supported_targets = "native"

@@ -46,7 +46,7 @@
 
 ## Delivery order
 
-1. repositoryを手動登録してlocal保存
+1. repositoryを手動登録してlocal保存 **完了**
 2. PATを使った`GET /user`接続
 3. 登録repositoryのissue/pull取得
 4. notification/mentionを統合したInbox

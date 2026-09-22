@@ -1,5 +1,8 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+#include <moonbit.h>
+
+#include <cstring>
 
 #include "../../vendor/imgui/imgui.cpp"
 #include "../../vendor/imgui/imgui_draw.cpp"
@@ -97,10 +100,13 @@ extern "C" int github_client_imgui_init(GLFWwindow* window) {
   return 1;
 }
 
+static char github_client_repository_input[256] = "";
+
 extern "C" int github_client_imgui_render(
   GLFWwindow* window,
   int page,
-  int sign_in_requests
+  int sign_in_requests,
+  int repository_count
 ) {
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplGlfw_NewFrame();
@@ -218,7 +224,24 @@ extern "C" int github_client_imgui_render(
                     ImGuiChildFlags_Borders);
   ImGui::TextUnformatted(recent_titles[page]);
   ImGui::Separator();
-  ImGui::TextDisabled("%s", empty_messages[page]);
+  if (page == 1) {
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 190.0f);
+    ImGui::InputTextWithHint(
+      "##repository.register.input",
+      "owner/repository",
+      github_client_repository_input,
+      sizeof(github_client_repository_input)
+    );
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
+    if (ImGui::Button("Register##repository.register", ImVec2(150.0f, 0.0f))) {
+      action = 2;
+    }
+    ImGui::PopStyleColor();
+    ImGui::TextDisabled("Registered: %d", repository_count);
+  } else {
+    ImGui::TextDisabled("%s", empty_messages[page]);
+  }
   ImGui::EndChild();
   ImGui::EndChild();
   ImGui::End();
@@ -232,6 +255,18 @@ extern "C" int github_client_imgui_render(
   glClear(GL_COLOR_BUFFER_BIT);
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
   return action;
+}
+
+extern "C" moonbit_string_t github_client_imgui_take_repository(void) {
+  const size_t length = std::strlen(github_client_repository_input);
+  moonbit_string_t result = moonbit_make_string(length, 0);
+  for (size_t index = 0; index < length; ++index) {
+    result[index] = static_cast<uint16_t>(
+      static_cast<unsigned char>(github_client_repository_input[index])
+    );
+  }
+  github_client_repository_input[0] = '\0';
+  return result;
 }
 
 extern "C" void github_client_imgui_shutdown(void) {

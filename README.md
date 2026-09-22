@@ -25,9 +25,18 @@ GLFWを製品window hostとして採用し、OpenGL 3 + Dear ImGuiを接続す�
 - Open external URLs: `moonbit-community/proton_shell`
 - Packaging: `moonbit-community/proton_package`
 
-登録repository、mention、dependency activityの関連付けは[Product scope](docs/product-scope.md)を参照してください。
+登録repository、mention、dependency activityの関連付けは[Product scope](docs/product-scope.md)、依存方向は[Module boundaries](docs/module-boundaries.md)を参照してください。
 
 Kaguraはゲームエンジンなので採用しません。特定作者に寄せず、MoonBitコミュニティ全体のパッケージを比較します。
+
+## Modules
+
+- `modules/domain`: Pureなproduct modelとrelevance rule
+- `modules/github_api`: 最小GitHub API surface
+- `modules/repository_store`: 登録repositoryのfilesystem persistence
+- `cmd/github_client`: desktop composition root
+
+module間の循環参照は禁止し、`repository_store → domain`以外はcomposition rootからのみ参照します。
 
 ## Windows bootstrap
 

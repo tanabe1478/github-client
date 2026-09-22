@@ -16,33 +16,70 @@ fn main {
     return
   }
 
-  let mut model = @app.Model::new()
+  let mut model = @domain.Model::new()
+  match @repository_store.load_default() {
+    Ok(repositories) =>
+      for repository in repositories {
+        model = @domain.update(
+          model,
+          @domain.Msg::RegisterRepository(repository),
+        )
+      }
+    Err(error) => println("repository-store: load failed: \{error}")
+  }
   while !@glfw.window_should_close(window) {
     @glfw.poll_events()
     let action = imgui_render(
       window,
       model.page().code(),
       model.sign_in_requests(),
+      model.repositories().length(),
     )
     match action {
       1 => {
-        model = @app.update(model, @app.Msg::RequestSignIn)
+        model = @domain.update(model, @domain.Msg::RequestSignIn)
         println("ui-action: auth.sign-in count=\{model.sign_in_requests()}")
       }
+      2 =>
+        match @domain.RepositoryRef::parse(imgui_take_repository()) {
+          Ok(repository) => {
+            model = @domain.update(
+              model,
+              @domain.Msg::RegisterRepository(repository),
+            )
+            match @repository_store.save_default(model.repositories()) {
+              Ok(_) => println("ui-action: repository.register")
+              Err(error) => println("repository-store: save failed: \{error}")
+            }
+          }
+          Err(error) => println("repository-register: \{error}")
+        }
       10 => {
-        model = @app.update(model, @app.Msg::Navigate(@app.Page::Inbox))
+        model = @domain.update(
+          model,
+          @domain.Msg::Navigate(@domain.Page::Inbox),
+        )
         println("ui-action: nav.inbox")
       }
       11 => {
-        model = @app.update(model, @app.Msg::Navigate(@app.Page::Repositories))
+        model = @domain.update(
+          model,
+          @domain.Msg::Navigate(@domain.Page::Repositories),
+        )
         println("ui-action: nav.repositories")
       }
       12 => {
-        model = @app.update(model, @app.Msg::Navigate(@app.Page::PullRequests))
+        model = @domain.update(
+          model,
+          @domain.Msg::Navigate(@domain.Page::PullRequests),
+        )
         println("ui-action: nav.pull-requests")
       }
       13 => {
-        model = @app.update(model, @app.Msg::Navigate(@app.Page::Issues))
+        model = @domain.update(
+          model,
+          @domain.Msg::Navigate(@domain.Page::Issues),
+        )
         println("ui-action: nav.issues")
       }
       _ => ()

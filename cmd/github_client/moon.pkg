@@ -1,6 +1,7 @@
 import {
   "mizchi/glfw",
-  "tanabe1478/github-client/app",
+  "tanabe1478/github-client-domain" @domain,
+  "tanabe1478/github-client-repository-store" @repository_store,
 }
 
 pkgtype(kind: "executable")

@@ -8,7 +8,11 @@ extern "C" fn github_client_imgui_render(
   window : @glfw.GLFWwindow,
   page : Int,
   sign_in_requests : Int,
+  repository_count : Int,
 ) -> Int = "github_client_imgui_render"
+
+///|
+extern "C" fn github_client_imgui_take_repository() -> String = "github_client_imgui_take_repository"
 
 ///|
 extern "C" fn github_client_imgui_shutdown() -> Unit = "github_client_imgui_shutdown"
@@ -23,8 +27,14 @@ fn imgui_render(
   window : @glfw.GLFWwindow,
   page : Int,
   sign_in_requests : Int,
+  repository_count : Int,
 ) -> Int {
-  github_client_imgui_render(window, page, sign_in_requests)
+  github_client_imgui_render(window, page, sign_in_requests, repository_count)
+}
+
+///|
+fn imgui_take_repository() -> String {
+  github_client_imgui_take_repository()
 }
 
 ///|

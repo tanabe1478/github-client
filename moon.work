@@ -1,4 +1,7 @@
 members = [
   ".",
+  "modules/domain",
+  "modules/github_api",
+  "modules/repository_store",
   "vendor/glfw-mbt",
 ]
