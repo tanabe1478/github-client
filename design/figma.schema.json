@@ -2,10 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "GitHub Client Figma Binding",
   "type": "object",
-  "required": ["version", "status", "file", "sourceOfTruth", "surfaces", "tokens"],
+  "required": ["version", "status", "file", "sourceOfTruth", "figmaNodes", "sync", "surfaces", "tokens"],
   "properties": {
     "version": { "const": 1 },
-    "status": { "enum": ["unbound", "active", "archived"] },
+    "status": { "enum": ["unbound", "partial", "active", "archived"] },
     "file": {
       "type": "object",
       "required": ["url", "key", "name"],
@@ -21,6 +21,27 @@
       "required": ["visualDesign", "behaviorAndAccessibility", "implementationEvidence"],
       "additionalProperties": { "type": "string" }
     },
+    "figmaNodes": {
+      "type": "object",
+      "properties": {
+        "cover": { "type": "string" },
+        "foundations": { "type": "string" },
+        "components": { "type": "object", "additionalProperties": { "type": "string" } },
+        "pages": { "type": "object", "additionalProperties": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "sync": {
+      "type": "object",
+      "required": ["state", "completedPhases", "pendingPhases"],
+      "properties": {
+        "state": { "enum": ["pending", "blocked", "synchronized"] },
+        "reason": { "type": "string" },
+        "completedPhases": { "type": "array", "items": { "type": "string" } },
+        "pendingPhases": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
     "surfaces": {
       "type": "array",
       "items": {
@@ -35,7 +56,7 @@
             "items": { "type": "string", "minLength": 1 },
             "minItems": 1
           },
-          "evidence": { "type": "string", "minLength": 1 }
+          "evidence": { "type": ["string", "null"] }
         },
         "additionalProperties": false
       }

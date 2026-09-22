@@ -65,14 +65,14 @@ OAuth中に一時token fileが作られるが、adapter接続時にWindows Crede
 
 ## Binding a Figma file
 
-現在`design/figma.json`は`unbound`である。Figma fileを作成または選択したら次を行う。
+Figma fileは`design/figma.json`へbindingする。現在のfileは作成済みで、Starter planのMCP call上限によりscreen node作成が未完了のため`partial`である。
 
-1. `file.url`へFigma file URLを設定する。
-2. URLからfile keyを取り出して`file.key`へ設定する。
-3. 各surfaceに安定したtop-level frameを作り、そのnode IDを`figmaNodeId`へ設定する。
-4. `status`を`active`へ変更する。
-5. `node scripts/design/check-figma-config.cjs`を実行する。
-6. MCPでmetadata、design context、screenshotを読み、native screenshotと比較する。
+1. `file.url`と`file.key`が対象fileを指すことを確認する。
+2. `docs/screens.md`の全surfaceに安定したtop-level frameを作る。
+3. 各frameのnode IDを`figmaNodeId`へ設定する。
+4. native screenshotとFigma screenshotを比較する。
+5. 全surfaceが同期した場合だけ`status`と`sync.state`を`active` / `synchronized`へ変更する。
+6. `node scripts/design/check-figma-config.cjs`を実行する。
 
 Node IDはframe名より安定した参照として扱う。frameを作り直した場合は同じ変更でmanifestも更新する。
 
@@ -81,7 +81,7 @@ Node IDはframe名より安定した参照として扱う。frameを作り直し
 Designに関する作業では全agentが次の順序を守る。
 
 1. `design/figma.json`と`design/tokens.json`を読む。
-2. `status=unbound`なら推測でFigma fileを選ばず、URLをユーザーへ確認する。
+2. `status=unbound`なら推測でFigma fileを選ばず、URLをユーザーへ確認する。`partial`なら空のnode IDを未同期として扱う。
 3. 対象surfaceのnode IDだけをMCPで読む。file全体を無制限に取得しない。
 4. metadata、design context、screenshotを取得する。
 5. 対応するimplementation fileとnative screenshotを比較する。

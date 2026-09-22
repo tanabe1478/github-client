@@ -12,7 +12,7 @@ description: Synchronizes this repository's native desktop UI with its bound Fig
 3. Read `docs/design-workflow.md`.
 4. Resolve relative paths from the repository root.
 
-If `design/figma.json` has `status: "unbound"`, do not guess a Figma file or node. Ask the user for the Figma file URL or help create/select one, then bind it according to `docs/design-workflow.md`.
+If `design/figma.json` has `status: "unbound"`, do not guess a Figma file or node. Ask the user for the Figma file URL or help create/select one, then bind it according to `docs/design-workflow.md`. If it has `status: "partial"`, use existing node IDs but treat every empty `figmaNodeId` as unsynchronized and never invent one.
 
 ## Reading design
 

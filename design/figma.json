@@ -1,10 +1,10 @@
 {
   "$schema": "./figma.schema.json",
   "version": 1,
-  "status": "unbound",
+  "status": "partial",
   "file": {
-    "url": "",
-    "key": "",
+    "url": "https://www.figma.com/design/qY6HwvLT6seO7Zi6JBVXBZ",
+    "key": "qY6HwvLT6seO7Zi6JBVXBZ",
     "name": "MoonBit GitHub Client"
   },
   "sourceOfTruth": {
@@ -12,48 +12,73 @@
     "behaviorAndAccessibility": "repository",
     "implementationEvidence": "native screenshots"
   },
+  "figmaNodes": {
+    "cover": "5:2",
+    "foundations": "7:2",
+    "components": {},
+    "pages": {
+      "cover": "0:1",
+      "designSystem": "4:4",
+      "screens": "4:5"
+    }
+  },
+  "sync": {
+    "state": "blocked",
+    "reason": "Figma Starter MCP tool-call limit reached while creating components and screens",
+    "completedPhases": ["discovery", "foundations", "file-structure"],
+    "pendingPhases": ["components", "screens", "code-connect", "visual-qa"]
+  },
   "surfaces": [
     {
-      "id": "desktop-shell",
-      "name": "Desktop shell",
+      "id": "inbox",
+      "name": "Inbox",
       "figmaNodeId": "",
-      "implementation": [
-        "cmd/github_client/imgui_bridge.cpp",
-        "cmd/github_client/main.mbt"
-      ],
-      "evidence": "artifacts/github-theme/window.png"
-    },
-    {
-      "id": "repositories",
-      "name": "Watched repositories",
-      "figmaNodeId": "",
-      "implementation": [
-        "cmd/github_client/imgui_bridge.cpp",
-        "modules/domain/model.mbt"
-      ],
-      "evidence": "artifacts/watch-actions/repositories.png"
+      "implementation": ["cmd/github_client/imgui_bridge.cpp", "modules/domain/inbox.mbt"],
+      "evidence": "artifacts/activity-smoke/inbox.png"
     },
     {
       "id": "for-you",
       "name": "For you",
       "figmaNodeId": "",
-      "implementation": [
-        "cmd/github_client/imgui_bridge.cpp",
-        "modules/github_api/personal_activity.mbt"
-      ],
+      "implementation": ["cmd/github_client/imgui_bridge.cpp", "modules/github_api/personal_activity.mbt"],
       "evidence": "artifacts/for-you/for-you.png"
     },
     {
-      "id": "settings",
-      "name": "Settings and GitHub credential",
+      "id": "repositories",
+      "name": "Repositories",
       "figmaNodeId": "",
-      "implementation": [
-        "cmd/github_client/imgui_bridge.cpp",
-        "modules/credential_store/store.mbt"
-      ],
-      "evidence": "artifacts/interaction-smoke/after.png"
+      "implementation": ["cmd/github_client/imgui_bridge.cpp", "modules/domain/model.mbt"],
+      "evidence": "artifacts/watch-actions/repositories.png"
+    },
+    {
+      "id": "pull-requests",
+      "name": "Pull requests",
+      "figmaNodeId": "",
+      "implementation": ["cmd/github_client/imgui_bridge.cpp", "modules/github_api/activity.mbt"],
+      "evidence": null
+    },
+    {
+      "id": "issues",
+      "name": "Issues",
+      "figmaNodeId": "",
+      "implementation": ["cmd/github_client/imgui_bridge.cpp", "modules/github_api/activity.mbt"],
+      "evidence": null
+    },
+    {
+      "id": "settings",
+      "name": "Settings",
+      "figmaNodeId": "",
+      "implementation": ["cmd/github_client/imgui_bridge.cpp", "modules/credential_store/store.mbt"],
+      "evidence": null
+    },
+    {
+      "id": "pat-dialog",
+      "name": "Personal access token dialog",
+      "figmaNodeId": "",
+      "implementation": ["cmd/github_client/imgui_bridge.cpp", "modules/credential_store/store.mbt"],
+      "evidence": null
     }
   ],
   "tokens": "./tokens.json",
-  "lastReviewedAt": null
+  "lastReviewedAt": "2026-09-22T15:26:18.117Z"
 }

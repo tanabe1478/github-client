@@ -37,7 +37,7 @@ Figma、Claude Code、Codex、PiはFigma公式Remote MCPを共通endpointとし�
 node scripts/design/check-figma-config.cjs
 ```
 
-初期設定とsource-of-truthの運用は[`docs/design-workflow.md`](docs/design-workflow.md)を参照してください。Figma fileを選択するまではmanifestが`unbound`になっています。
+初期設定とsource-of-truthの運用は[`docs/design-workflow.md`](docs/design-workflow.md)、画面一覧は[`docs/screens.md`](docs/screens.md)を参照してください。manifestの`partial`はFigma fileがbound済みで、未同期screenが残っている状態です。
 
 ## Modules
 
