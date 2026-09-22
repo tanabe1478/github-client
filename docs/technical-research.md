@@ -15,9 +15,9 @@
 
 | 関心 | 採用候補 | 判断 |
 |---|---|---|
-| Window/input | [`mizchi/glfw`](https://github.com/mizchi/glfw-mbt) | 採用。Windows対応を実機検証する |
-| GPU rendering | [`mizchi/kagura`](https://github.com/mizchi/kagura) のnative runtime | 最有力。GLFWからWin32 `HWND`を取得してwgpu surfaceを作る実装が既にある |
-| UI | [`LING71671/moon-egui`](https://github.com/LING71671/moon-egui) | UIロジック候補。native rendererは未実装なのでアダプターが必要 |
+| Window/input | [`mizchi/glfw`](https://github.com/mizchi/glfw-mbt) | 採用。Windows runtime smokeは実機で成功 |
+| UI core | [`moonbitstack/moonegui`](https://github.com/moonbitstack/moonegui) | 第一候補。ゲームエンジンではなく、描画backendを12操作に分離したPure MoonBit GUI |
+| Native rendering | Skia / NanoVG | 比較中。GLFW windowへのpresent経路を先に実証する |
 | GitHub REST API | [`mizchi/github`](https://github.com/mizchi/github) | 採用候補。クライアントを新規実装する必要はほぼない |
 | 一般HTTP | [`oboard/reqbest`](https://github.com/oboard/reqbest) | GitHub APIクライアントで足りない認証等の補助候補 |
 | JSON | `moonbitlang/core/json` | 採用 |
@@ -26,7 +26,9 @@
 | Browser起動 | `moonbit-community/proton_shell` | 採用候補 |
 | 配布 | `moonbit-community/proton_package` | 採用候補。Windows app/zip/NSISを生成可能 |
 
-最大の未解決点は「`moon-egui`の描画コマンドとテキスト入力をKagura/wgpu-nativeへどう接続するか」である。まずこの縦切りスパイクを作る。
+Kaguraは調査対象には含めるが採用しない。ゲームエンジンのruntimeをデスクトップアプリの土台にするのではなく、GUI coreとrenderer/window hostを明示的に分離する。
+
+最大の未解決点は「GLFW windowへ、GUIに必要な文字・clip・pathを含む2D描画をどうpresentするか」である。
 
 ---
 
@@ -44,6 +46,8 @@ Windowsについて確認できたこと:
 - consumer側にGLFWのlink flagsが必要。
 - CIはMoonBitが追加する`-lm`に対し、ダミーの`m.lib`を作るworkaroundを持つ。
 - ローカルforkは [`tanabe1478/glfw-mbt`](https://github.com/tanabe1478/glfw-mbt)。
+- Windows 11実機で初期化、window作成、event poll、破棄までのruntime smokeに成功した。
+- 非ASCII titleが`?`へ置換される問題をforkの`windows/unicode-window-title`でUTF-8変換へ修正した。upstream PRはもう少し利用実績をためてから判断する。
 
 注意点:
 
@@ -51,30 +55,55 @@ Windowsについて確認できたこと:
 - `create_window`は`GLFW_NO_API`で作成されるため、WebGPU等のsurfaceを接続する必要がある。
 - 現時点の公開APIからはWin32 `HWND`を直接取得できない。
 
-### 1.2 `mizchi/kagura`
+### 1.2 MoonBitコミュニティ全体のGUI候補
 
-2D-firstのMoonBitゲームエンジンだが、GLFW + wgpu-nativeをつなぐ実装資産として有力。
+#### `moonbitstack/moonegui`
 
-利用価値:
+Rust eguiに着想を得たPure MoonBitのimmediate-mode GUI。
 
-- native backendが`mizchi/glfw`を利用している。
-- Windowsでは`glfwGetWin32Window`と`GetModuleHandle`から`WGPUSurfaceSourceWindowsHWND`を構築するC bridgeが既にある。
-- 画像、フォント、テキスト、atlas、scissor、2D triangle renderer、入力snapshot、DPIなどの基盤がある。
-- `mizchi/font`、`mizchi/image`、`mizchi/layout`等を統合している。
+- GUI coreは同期的でhost loopを所有しないため、GLFW loopへ組み込みやすい。
+- backend契約はtext measurement 3操作とdraw 9操作に限定されている。
+- button、label、checkbox、radio、slider、text edit、layout、focus、hit testがある。
+- recording backendと177件のtestを持つ。
+- native backend、画像、data table、virtual list、複数windowはまだない。
 
-制約:
+GLFWを維持する今回の第一候補。足りないwidgetはアプリ固有に閉じず、再利用可能ならupstream contributionを検討する。
 
-- 主用途はゲームエンジンで、一般的なデスクトップwidget toolkitではない。
-- Native Windowsは「部分対応」で、実機runtime検証は限定的。
-- `engine/ui`にはtree、layout、focus、hit testing、render adapterがあるが、完成済みのbutton/list/text input widget群ではない。
-- wgpu-native、GLFW、OSライブラリのlink flagsを最終実行packageに記述する必要がある。
+#### `wzzc-dev/MoUI`
 
-判断:
+MoonBitコミュニティで最も包括的な宣言的GUI候補。
 
-- Kagura全体をアプリframeworkとして使うか、native renderer周辺だけを使うかはスパイク後に決める。
-- GLFW→Win32 surface bridgeを独自再実装するより、まずKaguraの既存経路を利用する。
+- TEA型のProgram/Effect/Subscription、豊富なdesktop widget、table、virtual list、text/IME、semantics/accessibilityを持つ。
+- Windowsをcommitted platformとし、Skia rendererと専用Win32 hostがある。
+- GLFW backendは存在せず、desktopではMoUI自身のwindow lifecycleを使う。
+- GLFWを外せるなら非常に有力だが、今回のGLFW検証目的とは競合する。
 
-### 1.3 `Milky2018/wgpu_mbt`
+将来、GLFW要件を緩める場合の第一候補として残す。MoUIの設計とWindows hostは独自実装の参考にする。
+
+#### `NoahLiu/moonbit-libyue`
+
+libyue C++の包括的binding。
+
+- Windows 10/11実機対応、Linux複数desktop対応、macOS CI build対応。
+- 55 native widgets、57 themed components、text input、table、tree、dialog、clipboard、tray等を持つ。
+- 完成度の高い通常のdesktop GUIを最短で作る選択肢。
+- libyueがwindow/event/renderingを所有するためGLFWとは併用しない。
+
+製品完成を最優先するなら有力だが、GLFWベースという技術目標から今回は採用しない。
+
+#### その他
+
+- `tonyfettes/gtk`: GTK4 binding。Linuxには強いがWindows-firstと相性が悪い。
+- `KeqingMoe/qt`: Qt Widgets binding。現時点ではmacOSのみを明示的にsupport。
+- `LING71671/moon-egui`: widget数は多いが、browser/game向けでnative backendはplanned。
+- `wzzc-dev/imgui`: 初期のsimple bindingで、公開source/repository情報と実績が薄い。
+- WebView系（Proton、MoonView、Lepus、Orbit）: desktop frameworkとして有力だが、native self-rendered UIという目標から外す。
+
+### 1.3 `mizchi/kagura`
+
+GLFW + wgpu-nativeのWindows surface bridge実装は参考になる。ただしゲームエンジンであり、desktop widget/IME/accessibilityを主責務にしないため採用しない。
+
+### 1.4 `Milky2018/wgpu_mbt`
 
 wgpu-native C APIのMoonBitバインディング。Windows/macOS/Linux向けAPIを持つ。
 
@@ -87,7 +116,7 @@ wgpu-native C APIのMoonBitバインディング。Windows/macOS/Linux向けAPI�
 - Kagura rendererが利用困難な場合の第二候補。
 - 最初から直接使うより、統合済みのKaguraで技術リスクを減らす。
 
-### 1.4 `LING71671/moon-egui`
+### 1.5 `LING71671/moon-egui`
 
 Pure MoonBitのimmediate-mode GUI。headless coreが描画から分離されている。
 
@@ -110,7 +139,7 @@ Pure MoonBitのimmediate-mode GUI。headless coreが描画から分離されて�
 - `DrawCmd -> Kagura DrawTrianglesCommand`変換、font atlas、clip、入力変換を小さなadapter packageとして実装する。
 - adapterが汎用化できれば、moon-eguiまたはKaguraへのcontribution候補になる。
 
-### 1.5 その他の選択肢
+### 1.6 その他の選択肢
 
 - `tonyfettes/raylib` + `raygui`: Windowsを含む実績が比較的多くGUIもあるが、raylibがwindow/render loopを所有するためGLFWを検証する本プロジェクトの目的とずれる。
 - Dear ImGui binding: `wzzc-dev/imgui`があるが初期版で利用例中心。MoonBit-nativeなUI改修余地はmoon-eguiの方が大きい。
@@ -280,9 +309,9 @@ Windowsではcurrent-user/per-machine/bothのNSIS install mode、payload、short
 
 ## 実装スパイクの順序
 
-1. **Window smoke**: forkした`glfw-mbt`でWindows windowを作成・終了する。
-2. **Surface smoke**: GLFW window上でwgpu-native clear colorをpresentする。
-3. **UI smoke**: moon-eguiのbutton、scroll、textをnative描画する。
+1. **Window smoke**: forkした`glfw-mbt`でWindows windowを作成・終了する。**完了**
+2. **Renderer smoke**: GLFW window上で2D clear/rect/textをpresentする。
+3. **UI smoke**: mooneguiのbutton、scroll、textをnative描画する。
 4. **Async smoke**: 描画を止めずに`mizchi/github`でauthenticated userを取得する。
 5. **Auth storage smoke**: PATをDPAPIで暗号化・再読込・削除する。
 6. **Vertical slice**: repository listを取得し、scrollable listとして表示する。
@@ -293,7 +322,9 @@ Windowsではcurrent-user/per-machine/bothのNSIS install mode、payload、short
 ## 参考リンク
 
 - https://github.com/mizchi/glfw-mbt
-- https://github.com/mizchi/kagura
+- https://github.com/moonbitstack/moonegui
+- https://github.com/wzzc-dev/MoUI
+- https://github.com/lb091188/moonbit-libyue
 - https://github.com/moonbit-community/wgpu-mbt
 - https://github.com/LING71671/moon-egui
 - https://github.com/mizchi/github

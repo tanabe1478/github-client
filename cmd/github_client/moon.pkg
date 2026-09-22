@@ -1,0 +1,18 @@
+import {
+  "mizchi/glfw",
+}
+
+pkgtype(kind: "executable")
+
+supported_targets = "native"
+
+options(
+  link: {
+    "native": {
+      "cc": "${build.GITHUB_CLIENT_CC}",
+      "cc-flags": "${build.GITHUB_CLIENT_GLFW_CFLAGS}",
+      "cc-link-flags": "${build.GITHUB_CLIENT_GLFW_LIBS}",
+    },
+  },
+  targets: { "main.mbt": [ "native" ] },
+)

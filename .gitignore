@@ -2,6 +2,7 @@
 /.mooncakes/
 /.repos/
 /dist/
+/.native-libs/
 *.exe
 *.dll
 *.lib
