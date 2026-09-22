@@ -97,12 +97,37 @@ extern "C" int github_client_imgui_init(GLFWwindow* window) {
   return 1;
 }
 
-extern "C" int github_client_imgui_render(GLFWwindow* window, int counter) {
+extern "C" int github_client_imgui_render(
+  GLFWwindow* window,
+  int page,
+  int sign_in_requests
+) {
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplGlfw_NewFrame();
   ImGui::NewFrame();
 
-  bool activated = false;
+  int action = 0;
+  if (page < 0 || page > 3) {
+    page = 0;
+  }
+  const char* page_titles[] = {
+    "Repositories", "Pull requests", "Issues", "Actions"
+  };
+  const char* page_descriptions[] = {
+    "Browse and manage repositories from your GitHub account.",
+    "Review pull requests across repositories.",
+    "Track issues assigned to you and your teams.",
+    "Monitor workflow runs and their status."
+  };
+  const char* recent_titles[] = {
+    "Recent repositories", "Recent pull requests", "Recent issues", "Recent workflow runs"
+  };
+  const char* empty_messages[] = {
+    "No repositories loaded yet.",
+    "No pull requests loaded yet.",
+    "No issues loaded yet.",
+    "No workflow runs loaded yet."
+  };
   ImGuiIO& io = ImGui::GetIO();
   ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
   ImGui::SetNextWindowSize(io.DisplaySize);
@@ -140,10 +165,22 @@ extern "C" int github_client_imgui_render(GLFWwindow* window, int counter) {
   ImGui::Dummy(ImVec2(0.0f, 8.0f));
   ImGui::TextDisabled("  NAVIGATION");
   ImGui::Spacing();
-  ImGui::Selectable("  Repositories", true, 0, ImVec2(0.0f, 44.0f));
-  ImGui::Selectable("  Pull requests", false, 0, ImVec2(0.0f, 44.0f));
-  ImGui::Selectable("  Issues", false, 0, ImVec2(0.0f, 44.0f));
-  ImGui::Selectable("  Actions", false, 0, ImVec2(0.0f, 44.0f));
+  if (ImGui::Selectable("  Repositories##nav.repositories", page == 0, 0,
+                        ImVec2(0.0f, 44.0f))) {
+    action = 10;
+  }
+  if (ImGui::Selectable("  Pull requests##nav.pull-requests", page == 1, 0,
+                        ImVec2(0.0f, 44.0f))) {
+    action = 11;
+  }
+  if (ImGui::Selectable("  Issues##nav.issues", page == 2, 0,
+                        ImVec2(0.0f, 44.0f))) {
+    action = 12;
+  }
+  if (ImGui::Selectable("  Actions##nav.actions", page == 3, 0,
+                        ImVec2(0.0f, 44.0f))) {
+    action = 13;
+  }
   ImGui::EndChild();
 
   ImGui::SetCursorPos(ImVec2(264.0f, 92.0f));
@@ -152,8 +189,8 @@ extern "C" int github_client_imgui_render(GLFWwindow* window, int counter) {
     ImVec2(io.DisplaySize.x - 296.0f, io.DisplaySize.y - 116.0f),
     ImGuiChildFlags_None
   );
-  ImGui::TextUnformatted("Repositories");
-  ImGui::TextDisabled("Browse and manage repositories from your GitHub account.");
+  ImGui::TextUnformatted(page_titles[page]);
+  ImGui::TextDisabled("%s", page_descriptions[page]);
   ImGui::Dummy(ImVec2(0.0f, 10.0f));
 
   const float card_width = ImGui::GetContentRegionAvail().x;
@@ -168,20 +205,20 @@ extern "C" int github_client_imgui_render(GLFWwindow* window, int counter) {
   ImGui::Dummy(ImVec2(0.0f, 12.0f));
   ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
   if (ImGui::Button("Sign in to GitHub##auth.sign-in", ImVec2(174.0f, 42.0f))) {
-    activated = true;
+    action = 1;
   }
   ImGui::PopStyleColor();
   ImGui::SameLine();
   ImGui::AlignTextToFramePadding();
-  ImGui::TextDisabled("Interaction count: %d", counter);
+  ImGui::TextDisabled("Interaction count: %d", sign_in_requests);
   ImGui::EndChild();
 
   ImGui::Dummy(ImVec2(0.0f, 12.0f));
   ImGui::BeginChild("##recent.card", ImVec2(card_width, 150.0f),
                     ImGuiChildFlags_Borders);
-  ImGui::TextUnformatted("Recent repositories");
+  ImGui::TextUnformatted(recent_titles[page]);
   ImGui::Separator();
-  ImGui::TextDisabled("No repositories loaded yet.");
+  ImGui::TextDisabled("%s", empty_messages[page]);
   ImGui::EndChild();
   ImGui::EndChild();
   ImGui::End();
@@ -194,7 +231,7 @@ extern "C" int github_client_imgui_render(GLFWwindow* window, int counter) {
   glClearColor(0.08f, 0.09f, 0.12f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-  return activated ? 1 : 0;
+  return action;
 }
 
 extern "C" void github_client_imgui_shutdown(void) {

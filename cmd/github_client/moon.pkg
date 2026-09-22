@@ -1,5 +1,6 @@
 import {
   "mizchi/glfw",
+  "tanabe1478/github-client/app",
 }
 
 pkgtype(kind: "executable")
@@ -17,8 +18,5 @@ options(
     },
   },
   "native-stub": [ "imgui_bridge.cpp" ],
-  targets: {
-    "main.mbt": [ "native" ],
-    "imgui_bridge.mbt": [ "native" ],
-  },
+  targets: { "main.mbt": [ "native" ], "imgui_bridge.mbt": [ "native" ] },
 )

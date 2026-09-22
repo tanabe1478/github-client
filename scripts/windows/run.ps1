@@ -64,6 +64,9 @@ try {
   } else {
     moon run cmd/github_client --target native
   }
+  if ($LASTEXITCODE -ne 0) {
+    throw "MoonBit command failed with exit code $LASTEXITCODE."
+  }
 } finally {
   Pop-Location
 }

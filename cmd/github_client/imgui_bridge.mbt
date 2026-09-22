@@ -1,18 +1,17 @@
 ///|
 #borrow(window)
-extern "C" fn github_client_imgui_init(window : @glfw.GLFWwindow) -> Int =
-  "github_client_imgui_init"
+extern "C" fn github_client_imgui_init(window : @glfw.GLFWwindow) -> Int = "github_client_imgui_init"
 
 ///|
 #borrow(window)
 extern "C" fn github_client_imgui_render(
   window : @glfw.GLFWwindow,
-  counter : Int,
+  page : Int,
+  sign_in_requests : Int,
 ) -> Int = "github_client_imgui_render"
 
 ///|
-extern "C" fn github_client_imgui_shutdown() -> Unit =
-  "github_client_imgui_shutdown"
+extern "C" fn github_client_imgui_shutdown() -> Unit = "github_client_imgui_shutdown"
 
 ///|
 fn imgui_init(window : @glfw.GLFWwindow) -> Bool {
@@ -20,8 +19,12 @@ fn imgui_init(window : @glfw.GLFWwindow) -> Bool {
 }
 
 ///|
-fn imgui_render(window : @glfw.GLFWwindow, counter : Int) -> Bool {
-  github_client_imgui_render(window, counter) != 0
+fn imgui_render(
+  window : @glfw.GLFWwindow,
+  page : Int,
+  sign_in_requests : Int,
+) -> Int {
+  github_client_imgui_render(window, page, sign_in_requests)
 }
 
 ///|
