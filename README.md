@@ -43,4 +43,7 @@ $env:VCPKG_ROOT = "$HOME\vcpkg"
 ```powershell
 .\scripts\windows\run.ps1 -BuildOnly
 .\scripts\windows\capture-smoke.ps1
+.\scripts\windows\interaction-smoke.ps1
 ```
+
+`interaction-smoke.ps1`は実際のWindows windowを起動し、画面を撮影して`Sign in to GitHub`をクリックし、MoonBit側の状態更新と操作後のscreenshotを検証します。

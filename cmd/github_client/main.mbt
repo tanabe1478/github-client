@@ -21,6 +21,7 @@ fn main {
     @glfw.poll_events()
     if imgui_render(window, counter) {
       counter += 1
+      println("ui-action: auth.sign-in count=\{counter}")
     }
     @glfw.swap_buffers(window)
   }
