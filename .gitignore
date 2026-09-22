@@ -1,0 +1,12 @@
+/_build/
+/.mooncakes/
+/.repos/
+/dist/
+*.exe
+*.dll
+*.lib
+*.obj
+*.pdb
+.env
+.env.*
+!.env.example
