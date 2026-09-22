@@ -25,14 +25,33 @@ fn suggested_repository_rows(
 }
 
 ///|
-fn activity_rows(activities : Array[@github_api.ActivitySummary]) -> String {
+fn activity_row(
+  activity : @github_api.ActivitySummary,
+  label : String,
+  read_markers : Array[@domain.ReadMarker],
+) -> String {
+  let read_state = if @domain.activity_is_read(
+      read_markers,
+      activity.html_url(),
+      activity.updated_at(),
+    ) {
+    "read"
+  } else {
+    "unread"
+  }
+  "\{safe_row_text(label)}\t\{activity.html_url()}\t\{read_state}\t\{activity.updated_at()}"
+}
+
+///|
+fn activity_rows(
+  activities : Array[@github_api.ActivitySummary],
+  read_markers : Array[@domain.ReadMarker],
+) -> String {
   activities
   .map(activity => {
     let draft = if activity.is_draft() { " [draft]" } else { "" }
-    let label = safe_row_text(
-      "\{activity.repository()} #\{activity.number()}\{draft}  \{activity.title()}  · @\{activity.author()}",
-    )
-    "\{label}\t\{activity.html_url()}"
+    let label = "\{activity.repository()} #\{activity.number()}\{draft}  \{activity.title()}  · @\{activity.author()}"
+    activity_row(activity, label, read_markers)
   })
   .join("\n")
 }
@@ -49,8 +68,15 @@ fn merge_personal_rows(
   indices : Map[String, Int],
   activities : Array[@github_api.ActivitySummary],
   reason : String,
+  watched_repositories : Array[@domain.RepositoryRef],
 ) -> Unit {
   for activity in activities {
+    if !@domain.repository_is_watched(
+        watched_repositories,
+        activity.repository(),
+      ) {
+      continue
+    }
     match indices.get(activity.html_url()) {
       Some(index) =>
         if !rows[index].reasons.contains(reason) {
@@ -70,20 +96,28 @@ fn personal_activity_rows(
   assignments : Array[@github_api.ActivitySummary],
   mentions : Array[@github_api.ActivitySummary],
   subscriptions : Array[@github_api.ActivitySummary],
+  watched_repositories : Array[@domain.RepositoryRef],
+  read_markers : Array[@domain.ReadMarker],
 ) -> String {
   let rows : Array[PersonalRow] = []
   let indices : Map[String, Int] = Map([])
-  merge_personal_rows(rows, indices, review_requests, "Review requested")
-  merge_personal_rows(rows, indices, assignments, "Assigned")
-  merge_personal_rows(rows, indices, mentions, "Mentioned")
-  merge_personal_rows(rows, indices, subscriptions, "Subscribed")
+  merge_personal_rows(
+    rows, indices, review_requests, "Review requested", watched_repositories,
+  )
+  merge_personal_rows(
+    rows, indices, assignments, "Assigned", watched_repositories,
+  )
+  merge_personal_rows(
+    rows, indices, mentions, "Mentioned", watched_repositories,
+  )
+  merge_personal_rows(
+    rows, indices, subscriptions, "Subscribed", watched_repositories,
+  )
   rows
   .map(row => {
     let activity = row.activity
-    let label = safe_row_text(
-      "[\{row.reasons.join(", ")}] \{activity.repository()} #\{activity.number()}  \{activity.title()}  · @\{activity.author()}",
-    )
-    "\{label}\t\{activity.html_url()}"
+    let label = "[\{row.reasons.join(", ")}] \{activity.repository()} #\{activity.number()}  \{activity.title()}  · @\{activity.author()}"
+    activity_row(activity, label, read_markers)
   })
   .join("\n")
 }
@@ -205,6 +239,14 @@ async fn main {
   let assignments : Array[@github_api.ActivitySummary] = []
   let mentions : Array[@github_api.ActivitySummary] = []
   let subscriptions : Array[@github_api.ActivitySummary] = []
+  let mut read_markers : Array[@domain.ReadMarker] = match
+    @read_state_store.load_default() {
+    Ok(markers) => markers
+    Err(error) => {
+      println("read-state-store: load failed: \{error}")
+      []
+    }
+  }
   let mut authenticated_login = ""
   let mut saved_token : String? = None
   let mut sync_status = "Add a token to load GitHub activity."
@@ -294,10 +336,15 @@ async fn main {
       has_saved_token,
       repository_rows(model.repositories()),
       suggested_repository_rows(suggested_repositories),
-      activity_rows(pull_requests),
-      activity_rows(issues),
+      activity_rows(pull_requests, read_markers),
+      activity_rows(issues, read_markers),
       personal_activity_rows(
-        review_requests, assignments, mentions, subscriptions,
+        review_requests,
+        assignments,
+        mentions,
+        subscriptions,
+        model.repositories(),
+        read_markers,
       ),
       sync_status,
     )
@@ -397,11 +444,23 @@ async fn main {
           }
         }
       }
-      4 =>
-        match @shell.open(imgui_take_url()) {
+      4 => {
+        let url = imgui_take_url()
+        let updated_at = imgui_take_activity_updated_at()
+        if updated_at != "" {
+          read_markers = @domain.mark_activity_read(
+            read_markers, url, updated_at,
+          )
+          match @read_state_store.save_default(read_markers) {
+            Ok(_) => ()
+            Err(error) => println("read-state-store: save failed: \{error}")
+          }
+        }
+        match @shell.open(url) {
           Ok(_) => println("ui-action: activity.open")
           Err(error) => println("shell: open failed: \{error}")
         }
+      }
       5 => {
         let repository = imgui_take_selected_repository()
         model = @domain.update(model, @domain.Msg::RemoveRepository(repository))
@@ -415,6 +474,28 @@ async fn main {
           Err(error) => {
             sync_status = error
             println("repository-store: save failed: \{error}")
+          }
+        }
+      }
+      6 => {
+        let url = imgui_take_url()
+        let updated_at = imgui_take_activity_updated_at()
+        if @domain.activity_is_read(read_markers, url, updated_at) {
+          read_markers = @domain.mark_activity_unread(read_markers, url)
+          sync_status = "Activity marked unread."
+          println("ui-action: activity.mark-unread")
+        } else {
+          read_markers = @domain.mark_activity_read(
+            read_markers, url, updated_at,
+          )
+          sync_status = "Activity marked read."
+          println("ui-action: activity.mark-read")
+        }
+        match @read_state_store.save_default(read_markers) {
+          Ok(_) => ()
+          Err(error) => {
+            sync_status = error
+            println("read-state-store: save failed: \{error}")
           }
         }
       }

@@ -40,6 +40,7 @@ Kaguraはゲームエンジンなので採用しません。特定作者に寄�
 - `modules/app_paths`: OS別application data path
 - `modules/credential_store`: DPAPI/KeychainによるPAT暗号化保存
 - `modules/repository_store`: 登録repositoryのfilesystem persistence
+- `modules/read_state_store`: activityの未読・既読状態のfilesystem persistence
 - `cmd/github_client`: desktop composition root
 
 module間の循環参照は禁止し、依存方向は[Module boundaries](docs/module-boundaries.md)で固定します。
@@ -55,12 +56,13 @@ $env:VCPKG_ROOT = "$HOME\vcpkg"
 .\scripts\windows\run.ps1
 ```
 
-ビルドのみの場合は`.\scripts\windows\run.ps1 -BuildOnly`を使用します。GitHub Primer風themeを含む実画面をartifactとして確認できます。
+ビルドのみの場合は`.\scripts\windows\run.ps1 -BuildOnly`を使用します。GitHub Primer風themeを含む実画面をartifactとして確認できます。既読状態は`%LOCALAPPDATA%\MoonBitGitHubClient\read-state.txt`へ保存されます。
 
 ```powershell
 .\scripts\windows\run.ps1 -BuildOnly
 .\scripts\windows\capture-smoke.ps1
+.\scripts\windows\capture-smoke.ps1 -Page ForYou -Output artifacts\for-you\for-you.png
 .\scripts\windows\interaction-smoke.ps1
 ```
 
-`interaction-smoke.ps1`は実際のWindows windowを起動し、画面を撮影して`Sign in to GitHub`をクリックし、MoonBit側の状態更新と操作後のscreenshotを検証します。
+`interaction-smoke.ps1`は実際のWindows windowを起動し、Settings navigationと操作後のscreenshotを検証します。

@@ -7,7 +7,7 @@
 表示対象:
 
 1. 登録repositoryのpull requestとissue
-2. `For you`に分離したmention、assignment、review request、subscribed thread
+2. 登録repositoryに属し、`For you`に分離したmention、assignment、review request、subscribed thread
 3. 登録repositoryが依存するrepositoryのpull requestとissueのうち、登録repositoryへ影響するもの
 
 すべてのdependency repository activityを通知するとnoiseになるため、dependency側は関連理由を説明できる項目だけを採用する。
@@ -54,5 +54,6 @@
 5. mention、assignment、review request、subscriptionを`For you`へ統合 **完了**
 6. SBOMからdependency候補を抽出
 7. dependency repositoryの関連判定
-8. polling、既読、desktop notification
-9. Device Flowへの移行
+8. activityの未読・既読管理 **完了**
+9. pollingとdesktop notification
+10. Device Flowへの移行

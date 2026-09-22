@@ -113,11 +113,15 @@ extern "C" int github_client_imgui_init(GLFWwindow* window) {
 static char github_client_repository_input[256] = "";
 static char github_client_token_input[512] = "";
 static std::string github_client_selected_url;
+static std::string github_client_selected_activity_updated_at;
 static std::string github_client_selected_repository;
+static bool github_client_unread_only = false;
 
 struct GithubClientRow {
   std::string label;
   std::string url;
+  bool is_read;
+  std::string updated_at;
 };
 
 static std::string github_client_utf16_to_utf8(const uint16_t* source) {
@@ -169,10 +173,30 @@ static std::vector<GithubClientRow> github_client_parse_rows(
       end == std::string::npos ? std::string::npos : end - start
     );
     if (!line.empty()) {
-      const size_t separator = line.find('\t');
+      const size_t first = line.find('\t');
+      const size_t second = first == std::string::npos
+        ? std::string::npos
+        : line.find('\t', first + 1);
+      const size_t third = second == std::string::npos
+        ? std::string::npos
+        : line.find('\t', second + 1);
+      const std::string url = first == std::string::npos
+        ? ""
+        : line.substr(
+            first + 1,
+            second == std::string::npos ? std::string::npos : second - first - 1
+          );
+      const std::string state = second == std::string::npos
+        ? ""
+        : line.substr(
+            second + 1,
+            third == std::string::npos ? std::string::npos : third - second - 1
+          );
       rows.push_back({
-        line.substr(0, separator),
-        separator == std::string::npos ? "" : line.substr(separator + 1)
+        line.substr(0, first),
+        url,
+        state == "read",
+        third == std::string::npos ? "" : line.substr(third + 1)
       });
     }
     if (end == std::string::npos) {
@@ -205,15 +229,64 @@ static void github_client_render_activity_rows(
   const std::vector<GithubClientRow>& rows,
   int* action
 ) {
+  int unread_count = 0;
   for (const GithubClientRow& row : rows) {
-    const std::string id = row.label + "##activity." + row.url;
-    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(9, 105, 218, 255));
-    if (ImGui::Selectable(id.c_str(), false, ImGuiSelectableFlags_None,
-                          ImVec2(0.0f, 38.0f))) {
-      github_client_selected_url = row.url;
-      *action = 4;
+    if (!row.is_read) {
+      ++unread_count;
     }
-    ImGui::PopStyleColor();
+  }
+  ImGui::TextDisabled("Unread: %d of %d", unread_count, static_cast<int>(rows.size()));
+  ImGui::SameLine();
+  ImGui::Checkbox("Unread only##activity.unread-only", &github_client_unread_only);
+  ImGui::Separator();
+
+  const ImGuiTableFlags table_flags =
+    ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_BordersInnerH;
+  if (ImGui::BeginTable("##activity.rows", 4, table_flags)) {
+    ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 58.0f);
+    ImGui::TableSetupColumn("Activity", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("Open", ImGuiTableColumnFlags_WidthFixed, 82.0f);
+    ImGui::TableSetupColumn("Read action", ImGuiTableColumnFlags_WidthFixed, 128.0f);
+    for (const GithubClientRow& row : rows) {
+      if (github_client_unread_only && row.is_read) {
+        continue;
+      }
+      ImGui::PushID(row.url.c_str());
+      ImGui::TableNextRow(0, 42.0f);
+      ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
+      if (row.is_read) {
+        ImGui::TextDisabled("Read");
+      } else {
+        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(9, 105, 218, 255));
+        ImGui::TextUnformatted("Unread");
+        ImGui::PopStyleColor();
+      }
+      ImGui::TableSetColumnIndex(1);
+      ImGui::AlignTextToFramePadding();
+      if (row.is_read) {
+        ImGui::TextDisabled("%s", row.label.c_str());
+      } else {
+        ImGui::TextUnformatted(row.label.c_str());
+      }
+      ImGui::TableSetColumnIndex(2);
+      if (ImGui::Button("Open##activity.open", ImVec2(76.0f, 32.0f))) {
+        github_client_selected_url = row.url;
+        github_client_selected_activity_updated_at = row.updated_at;
+        *action = 4;
+      }
+      ImGui::TableSetColumnIndex(3);
+      const char* toggle_label = row.is_read
+        ? "Mark unread##activity.toggle"
+        : "Mark read##activity.toggle";
+      if (ImGui::Button(toggle_label, ImVec2(122.0f, 32.0f))) {
+        github_client_selected_url = row.url;
+        github_client_selected_activity_updated_at = row.updated_at;
+        *action = 6;
+      }
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
   }
 }
 
@@ -259,7 +332,7 @@ extern "C" int github_client_imgui_render(
     "Review relevant pull requests across monitored repositories.",
     "Track issues from Watched repositories in one place.",
     "Manage authentication and application preferences.",
-    "Mentions, assignments, review requests, and subscribed threads."
+    "Personal activity from Watched repositories only."
   };
   const char* recent_titles[] = {
     "Watched activity", "Watched repositories", "Relevant pull requests",
@@ -271,7 +344,7 @@ extern "C" int github_client_imgui_render(
     "No relevant pull requests found.",
     "No relevant issues found.",
     "No credential is configured.",
-    "No mentions, assignments, review requests, or subscriptions were found."
+    "No personal activity was found in Watched repositories."
   };
   ImGuiIO& io = ImGui::GetIO();
   ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
@@ -578,6 +651,18 @@ extern "C" moonbit_string_t github_client_imgui_take_url(void) {
     );
   }
   github_client_selected_url.clear();
+  return result;
+}
+
+extern "C" moonbit_string_t github_client_imgui_take_activity_updated_at(void) {
+  const size_t length = github_client_selected_activity_updated_at.size();
+  moonbit_string_t result = moonbit_make_string(length, 0);
+  for (size_t index = 0; index < length; ++index) {
+    result[index] = static_cast<uint16_t>(
+      static_cast<unsigned char>(github_client_selected_activity_updated_at[index])
+    );
+  }
+  github_client_selected_activity_updated_at.clear();
   return result;
 }
 

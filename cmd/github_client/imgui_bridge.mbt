@@ -28,6 +28,9 @@ extern "C" fn github_client_imgui_take_token() -> String = "github_client_imgui_
 extern "C" fn github_client_imgui_take_url() -> String = "github_client_imgui_take_url"
 
 ///|
+extern "C" fn github_client_imgui_take_activity_updated_at() -> String = "github_client_imgui_take_activity_updated_at"
+
+///|
 extern "C" fn github_client_imgui_take_selected_repository() -> String = "github_client_imgui_take_selected_repository"
 
 ///|
@@ -84,6 +87,11 @@ fn imgui_take_token() -> String {
 ///|
 fn imgui_take_url() -> String {
   github_client_imgui_take_url()
+}
+
+///|
+fn imgui_take_activity_updated_at() -> String {
+  github_client_imgui_take_activity_updated_at()
 }
 
 ///|

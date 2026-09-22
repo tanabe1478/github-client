@@ -5,7 +5,7 @@ Repository code is the source of truth for behavior, accessibility, security, pl
 | Stable ID | Screen/state | Primary purpose |
 |---|---|---|
 | `inbox` | Inbox | Watched repositories and relevant dependency impact |
-| `for-you` | For you | Mentions, assignments, review requests, subscriptions |
+| `for-you` | For you | Mentions, assignments, review requests, and subscriptions from Watched repositories |
 | `repositories` | Repositories | Watch, filter, and remove repositories |
 | `pull-requests` | Pull requests | Open pull requests from watched repositories |
 | `issues` | Issues | Open issues from watched repositories |
@@ -15,3 +15,5 @@ Repository code is the source of truth for behavior, accessibility, security, pl
 ## Required states
 
 Each screen should implement and test relevant loading, empty, error, populated, disabled, and destructive-action states. Important operations use explicit buttons; row click and double click are not primary actions.
+
+Activity screens expose unread counts, an unread-only filter, and explicit `Open` / `Mark read` / `Mark unread` actions. Opening an activity marks its current GitHub `updated_at` revision as read. A later GitHub update makes it unread again.

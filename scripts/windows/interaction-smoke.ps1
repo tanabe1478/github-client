@@ -20,23 +20,55 @@ Remove-Item $StdoutPath, $StderrPath -Force -ErrorAction SilentlyContinue
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class GithubClientInteraction {
   [StructLayout(LayoutKind.Sequential)]
   public struct RECT { public int Left, Top, Right, Bottom; }
+  private delegate bool EnumWindowsProc(IntPtr handle, IntPtr parameter);
+  [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
+  [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
+  [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr handle);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr handle, StringBuilder text, int count);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr handle, out RECT rect);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr handle);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr handle, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
+  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr handle, IntPtr deviceContext, uint flags);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
+  public static IntPtr FindAppWindow(int processId) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((handle, parameter) => {
+      uint candidateProcessId;
+      GetWindowThreadProcessId(handle, out candidateProcessId);
+      if (candidateProcessId != (uint)processId || !IsWindowVisible(handle)) return true;
+      var title = new StringBuilder(256);
+      GetWindowText(handle, title, title.Capacity);
+      if (title.ToString().StartsWith("MoonBit GitHub Client")) {
+        found = handle;
+        return false;
+      }
+      return true;
+    }, IntPtr.Zero);
+    return found;
+  }
 }
 '@
 Add-Type -AssemblyName System.Drawing
 
-function Save-WindowScreenshot($Process, $Rect, [string]$Path) {
+function Save-WindowScreenshot([IntPtr]$WindowHandle, $Rect, [string]$Path) {
   $Bitmap = New-Object System.Drawing.Bitmap ($Rect.Right - $Rect.Left), ($Rect.Bottom - $Rect.Top)
   $Graphics = [System.Drawing.Graphics]::FromImage($Bitmap)
   try {
-    $Graphics.CopyFromScreen($Rect.Left, $Rect.Top, 0, 0, $Bitmap.Size)
+    $DeviceContext = $Graphics.GetHdc()
+    try {
+      $Printed = [GithubClientInteraction]::PrintWindow($WindowHandle, $DeviceContext, 2)
+    } finally {
+      $Graphics.ReleaseHdc($DeviceContext)
+    }
+    if (-not $Printed) {
+      $Graphics.CopyFromScreen($Rect.Left, $Rect.Top, 0, 0, $Bitmap.Size)
+    }
     $Bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
   } finally {
     $Graphics.Dispose()
@@ -46,6 +78,7 @@ function Save-WindowScreenshot($Process, $Rect, [string]$Path) {
 
 $Process = Start-Process -FilePath $Executable.FullName -PassThru `
   -RedirectStandardOutput $StdoutPath -RedirectStandardError $StderrPath
+$WindowHandle = [IntPtr]::Zero
 try {
   for ($Attempt = 0; $Attempt -lt 30; $Attempt++) {
     Start-Sleep -Seconds 1
@@ -53,32 +86,33 @@ try {
     if ($Process.HasExited) {
       throw "Application exited before interaction with code $($Process.ExitCode)."
     }
-    if ($Process.MainWindowHandle -ne [IntPtr]::Zero) {
-      break
-    }
+    $WindowHandle = [GithubClientInteraction]::FindAppWindow($Process.Id)
+    if ($WindowHandle -ne [IntPtr]::Zero) { break }
   }
-  if ($Process.MainWindowHandle -eq [IntPtr]::Zero) {
+  if ($WindowHandle -eq [IntPtr]::Zero) {
     throw "Application window did not appear within 30 seconds."
   }
 
+  $null = [GithubClientInteraction]::SetWindowPos(
+    $WindowHandle, [IntPtr](-1), 0, 0, 0, 0, 0x0001 -bor 0x0002 -bor 0x0040
+  )
+  $null = [GithubClientInteraction]::SetForegroundWindow($WindowHandle)
+  Start-Sleep -Milliseconds 200
   $Rect = New-Object GithubClientInteraction+RECT
-  if (-not [GithubClientInteraction]::GetWindowRect($Process.MainWindowHandle, [ref]$Rect)) {
+  if (-not [GithubClientInteraction]::GetWindowRect($WindowHandle, [ref]$Rect)) {
     throw "Could not read the application window bounds."
   }
-  Save-WindowScreenshot $Process $Rect (Join-Path $ArtifactPath "before.png")
+  Save-WindowScreenshot $WindowHandle $Rect (Join-Path $ArtifactPath "before.png")
 
-  # Authentication controls live only on Settings. Verify that the native
-  # navigation reaches that page; PAT entry itself remains masked.
-  $SettingsPoint = [IntPtr](445 * 65536 + 96)
-  $null = [GithubClientInteraction]::PostMessage($Process.MainWindowHandle, 0x0200, [IntPtr]::Zero, $SettingsPoint)
-  $null = [GithubClientInteraction]::PostMessage($Process.MainWindowHandle, 0x0201, [IntPtr]1, $SettingsPoint)
-  $null = [GithubClientInteraction]::PostMessage($Process.MainWindowHandle, 0x0202, [IntPtr]::Zero, $SettingsPoint)
+  $null = [GithubClientInteraction]::SetCursorPos($Rect.Left + 96, $Rect.Top + 475)
+  [GithubClientInteraction]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+  [GithubClientInteraction]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Seconds 2
 
-  Save-WindowScreenshot $Process $Rect (Join-Path $ArtifactPath "after.png")
-
-  # Close cleanly so redirected MoonBit stdout is flushed before assertion.
-  $null = $Process.CloseMainWindow()
+  Save-WindowScreenshot $WindowHandle $Rect (Join-Path $ArtifactPath "after.png")
+  $null = [GithubClientInteraction]::PostMessage(
+    $WindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero
+  )
   $null = $Process.WaitForExit(3000)
   [string]$OutputText = if (Test-Path $StdoutPath) { Get-Content $StdoutPath -Raw } else { "" }
   if (-not $OutputText.Contains("ui-action: nav.settings")) {
@@ -87,8 +121,12 @@ try {
   Write-Host "Interaction smoke passed. Artifacts: $ArtifactPath"
 } finally {
   if (-not $Process.HasExited) {
-    $null = $Process.CloseMainWindow()
-    Start-Sleep -Seconds 1
+    if ($WindowHandle -ne [IntPtr]::Zero) {
+      $null = [GithubClientInteraction]::PostMessage(
+        $WindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero
+      )
+      Start-Sleep -Seconds 1
+    }
   }
   if (-not $Process.HasExited) {
     Stop-Process -Id $Process.Id -Force

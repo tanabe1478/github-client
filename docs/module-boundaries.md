@@ -7,7 +7,9 @@ tanabe1478/github-client (desktop composition root)
   ├── github-client-domain
   ├── github-client-github-api
   ├── github-client-credential-store ──> github-client-app-paths
-  └── github-client-repository-store ──> github-client-app-paths
+  ├── github-client-repository-store ──> github-client-app-paths
+  │                                   └─> github-client-domain
+  └── github-client-read-state-store ──> github-client-app-paths
                                       └─> github-client-domain
 ```
 
@@ -33,6 +35,10 @@ PATをOS-backed storageで暗号化し、暗号文だけをfilesystemへ保存�
 
 登録repositoryのfilesystem persistenceを所有する。`app_paths`とdomainの`RepositoryRef`のみを一方向に参照する。GitHub APIとUIを参照しない。
 
+### `modules/read_state_store`
+
+activity URLごとの既読時点をfilesystemへ保存する。`app_paths`とdomainの`ReadMarker`のみを参照し、GitHub APIとUIを参照しない。
+
 ### Root module
 
 `cmd/github_client`がcomposition rootとしてmoduleを組み合わせる。domain rule、HTTP、storageの実装を持ち込まない。
@@ -42,7 +48,8 @@ PATをOS-backed storageで暗号化し、暗号文だけをfilesystemへ保存�
 - domain → storage / GitHub API / desktop UI
 - GitHub API → domain / storage / desktop UI
 - credential store → domain / repository store / GitHub API / desktop UI
-- repository store → credential store / GitHub API / desktop UI
+- repository store → credential store / read state store / GitHub API / desktop UI
+- read state store → credential store / repository store / GitHub API / desktop UI
 - app paths → 他のproject module
 - module同士の循環参照
 - C++ Dear ImGui bridge内へのproduct rule実装
