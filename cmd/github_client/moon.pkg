@@ -12,7 +12,13 @@ options(
       "cc": "${build.GITHUB_CLIENT_CC}",
       "cc-flags": "${build.GITHUB_CLIENT_GLFW_CFLAGS}",
       "cc-link-flags": "${build.GITHUB_CLIENT_GLFW_LIBS}",
+      "stub-cc": "${build.GITHUB_CLIENT_CXX}",
+      "stub-cc-flags": "${build.GITHUB_CLIENT_GLFW_CFLAGS} ${build.GITHUB_CLIENT_IMGUI_CXXFLAGS}",
     },
   },
-  targets: { "main.mbt": [ "native" ] },
+  "native-stub": [ "imgui_bridge.cpp" ],
+  targets: {
+    "main.mbt": [ "native" ],
+    "imgui_bridge.mbt": [ "native" ],
+  },
 )

@@ -2,7 +2,10 @@
 /.mooncakes/
 /.repos/
 /dist/
+/artifacts/
+/imgui.ini
 /.native-libs/
+/.native-tools/
 *.exe
 *.dll
 *.lib

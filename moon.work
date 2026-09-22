@@ -1,0 +1,4 @@
+members = [
+  ".",
+  "vendor/glfw-mbt",
+]

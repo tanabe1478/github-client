@@ -34,7 +34,13 @@ $LlvmBin = Join-Path $env:ProgramFiles "LLVM\bin"
 if (-not (Test-Path (Join-Path $LlvmBin "clang.exe"))) {
   throw "LLVM clang was not found. Install LLVM.LLVM with winget."
 }
-$env:Path = "$LlvmBin;$env:Path"
+# Moon derives `ar` from the configured clang++ driver name. LLVM ships the
+# executable as llvm-ar.exe, so provide the conventional name in a local tool
+# directory without modifying the LLVM installation.
+$NativeToolDir = Join-Path $RepoRoot ".native-tools\win32"
+New-Item -ItemType Directory -Force $NativeToolDir | Out-Null
+Copy-Item (Join-Path $LlvmBin "llvm-ar.exe") (Join-Path $NativeToolDir "ar.exe") -Force
+$env:Path = "$NativeToolDir;$LlvmBin;$env:Path"
 $env:VCPKG_ROOT = $VcpkgRoot
 $env:VCPKG_DEFAULT_TRIPLET = $Triplet
 $env:CPATH = (Join-Path $VcpkgRoot "installed\$Triplet\include")

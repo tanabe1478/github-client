@@ -1,0 +1,7 @@
+[submodule "vendor/glfw-mbt"]
+	path = vendor/glfw-mbt
+	url = https://github.com/tanabe1478/glfw-mbt.git
+	branch = windows/opengl-context
+[submodule "vendor/imgui"]
+	path = vendor/imgui
+	url = https://github.com/ocornut/imgui.git

@@ -49,8 +49,9 @@ function nativeConfig() {
     const libraryFlags = root ? `-L${slash(path.join(root, "lib"))}` : "";
     return {
       cc: "clang",
+      cxx: "clang++",
       cflags: includeFlags,
-      libs: `${libraryFlags} -lglfw3 -lgdi32 -luser32 -lshell32`,
+      libs: `${libraryFlags} -lglfw3 -lopengl32 -lgdi32 -luser32 -lshell32`,
     };
   }
 
@@ -58,25 +59,31 @@ function nativeConfig() {
     const prefix = command("brew", ["--prefix", "glfw"]);
     return {
       cc: "clang",
+      cxx: "clang++",
       cflags: prefix ? `-I${slash(path.join(prefix, "include"))}` : "",
-      libs: `${prefix ? `-L${slash(path.join(prefix, "lib"))}` : ""} -lglfw -framework Cocoa -framework IOKit -framework CoreFoundation -framework QuartzCore`,
+      libs: `${prefix ? `-L${slash(path.join(prefix, "lib"))}` : ""} -lglfw -framework OpenGL -framework Cocoa -framework IOKit -framework CoreFoundation -framework QuartzCore`,
     };
   }
 
   return {
     cc: process.env.CC || "clang",
+    cxx: process.env.CXX || "clang++",
     cflags: command("pkg-config", ["--cflags", "glfw3"]),
-    libs: command("pkg-config", ["--libs", "glfw3"]) || "-lglfw",
+    libs: `${command("pkg-config", ["--libs", "glfw3"]) || "-lglfw"} -lGL`,
   };
 }
 
 const config = nativeConfig();
-const localNativeLibs = slash(path.resolve(__dirname, "..", ".native-libs", process.platform));
+const repoRoot = path.resolve(__dirname, "..");
+const localNativeLibs = slash(path.join(repoRoot, ".native-libs", process.platform));
+const imguiInclude = slash(path.join(repoRoot, "vendor", "imgui"));
 process.stdout.write(
   `${JSON.stringify({
     vars: {
       GITHUB_CLIENT_CC: config.cc,
+      GITHUB_CLIENT_CXX: config.cxx,
       GITHUB_CLIENT_GLFW_CFLAGS: config.cflags,
+      GITHUB_CLIENT_IMGUI_CXXFLAGS: `-std=c++17 -I${imguiInclude}`,
       GITHUB_CLIENT_GLFW_LIBS: `-L${localNativeLibs} ${config.libs}`,
     },
   })}\n`,
