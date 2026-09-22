@@ -6,6 +6,9 @@
 /imgui.ini
 /.native-libs/
 /.native-tools/
+/.pi/npm/
+/.pi/git/
+/.pi/mcp-traces/
 *.exe
 *.dll
 *.lib

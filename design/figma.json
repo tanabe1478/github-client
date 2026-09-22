@@ -1,0 +1,59 @@
+{
+  "$schema": "./figma.schema.json",
+  "version": 1,
+  "status": "unbound",
+  "file": {
+    "url": "",
+    "key": "",
+    "name": "MoonBit GitHub Client"
+  },
+  "sourceOfTruth": {
+    "visualDesign": "figma",
+    "behaviorAndAccessibility": "repository",
+    "implementationEvidence": "native screenshots"
+  },
+  "surfaces": [
+    {
+      "id": "desktop-shell",
+      "name": "Desktop shell",
+      "figmaNodeId": "",
+      "implementation": [
+        "cmd/github_client/imgui_bridge.cpp",
+        "cmd/github_client/main.mbt"
+      ],
+      "evidence": "artifacts/github-theme/window.png"
+    },
+    {
+      "id": "repositories",
+      "name": "Watched repositories",
+      "figmaNodeId": "",
+      "implementation": [
+        "cmd/github_client/imgui_bridge.cpp",
+        "modules/domain/model.mbt"
+      ],
+      "evidence": "artifacts/watch-actions/repositories.png"
+    },
+    {
+      "id": "for-you",
+      "name": "For you",
+      "figmaNodeId": "",
+      "implementation": [
+        "cmd/github_client/imgui_bridge.cpp",
+        "modules/github_api/personal_activity.mbt"
+      ],
+      "evidence": "artifacts/for-you/for-you.png"
+    },
+    {
+      "id": "settings",
+      "name": "Settings and GitHub credential",
+      "figmaNodeId": "",
+      "implementation": [
+        "cmd/github_client/imgui_bridge.cpp",
+        "modules/credential_store/store.mbt"
+      ],
+      "evidence": "artifacts/interaction-smoke/after.png"
+    }
+  ],
+  "tokens": "./tokens.json",
+  "lastReviewedAt": null
+}

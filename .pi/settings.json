@@ -1,0 +1,6 @@
+{
+  "packages": [
+    "npm:pi-mcp-adapter@2.36.0",
+    "npm:pi-figma-remote-auth@0.1.3"
+  ]
+}

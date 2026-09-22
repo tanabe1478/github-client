@@ -1,0 +1,17 @@
+{
+  "settings": {
+    "hostConfigDiscovery": "off",
+    "mcpFooterStatus": "compact",
+    "notifyOnStartupConnect": false,
+    "outputGuard": true
+  },
+  "mcpServers": {
+    "figma": {
+      "url": "https://mcp.figma.com/mcp",
+      "auth": "oauth",
+      "lifecycle": "lazy",
+      "exposeResources": true,
+      "directTools": false
+    }
+  }
+}
