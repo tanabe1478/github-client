@@ -27,6 +27,7 @@ public static class GithubClientInteraction {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr handle);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
 }
 '@
 Add-Type -AssemblyName System.Drawing
@@ -46,10 +47,18 @@ function Save-WindowScreenshot($Process, $Rect, [string]$Path) {
 $Process = Start-Process -FilePath $Executable.FullName -PassThru `
   -RedirectStandardOutput $StdoutPath -RedirectStandardError $StderrPath
 try {
-  Start-Sleep -Seconds 3
-  $Process.Refresh()
-  if ($Process.HasExited) {
-    throw "Application exited before interaction with code $($Process.ExitCode)."
+  for ($Attempt = 0; $Attempt -lt 30; $Attempt++) {
+    Start-Sleep -Seconds 1
+    $Process.Refresh()
+    if ($Process.HasExited) {
+      throw "Application exited before interaction with code $($Process.ExitCode)."
+    }
+    if ($Process.MainWindowHandle -ne [IntPtr]::Zero) {
+      break
+    }
+  }
+  if ($Process.MainWindowHandle -eq [IntPtr]::Zero) {
+    throw "Application window did not appear within 30 seconds."
   }
 
   $Rect = New-Object GithubClientInteraction+RECT
@@ -60,10 +69,10 @@ try {
 
   # Authentication controls live only on Settings. Verify that the native
   # navigation reaches that page; PAT entry itself remains masked.
-  $null = [GithubClientInteraction]::SetForegroundWindow($Process.MainWindowHandle)
-  $null = [GithubClientInteraction]::SetCursorPos($Rect.Left + 100, $Rect.Top + 430)
-  [GithubClientInteraction]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
-  [GithubClientInteraction]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  $SettingsPoint = [IntPtr](389 * 65536 + 96)
+  $null = [GithubClientInteraction]::PostMessage($Process.MainWindowHandle, 0x0200, [IntPtr]::Zero, $SettingsPoint)
+  $null = [GithubClientInteraction]::PostMessage($Process.MainWindowHandle, 0x0201, [IntPtr]1, $SettingsPoint)
+  $null = [GithubClientInteraction]::PostMessage($Process.MainWindowHandle, 0x0202, [IntPtr]::Zero, $SettingsPoint)
   Start-Sleep -Seconds 2
 
   Save-WindowScreenshot $Process $Rect (Join-Path $ArtifactPath "after.png")

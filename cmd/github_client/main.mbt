@@ -38,6 +38,20 @@ fn activity_rows(activities : Array[@github_api.ActivitySummary]) -> String {
 }
 
 ///|
+fn without_repository(
+  activities : Array[@github_api.ActivitySummary],
+  repository : String,
+) -> Array[@github_api.ActivitySummary] {
+  let remaining : Array[@github_api.ActivitySummary] = []
+  for activity in activities {
+    if activity.repository() != repository {
+      remaining.push(activity)
+    }
+  }
+  remaining
+}
+
+///|
 async fn fetch_repository_activity(
   token : String,
   repository : @domain.RepositoryRef,
@@ -88,8 +102,8 @@ async fn main {
       }
     Err(error) => println("repository-store: load failed: \{error}")
   }
-  let pull_requests : Array[@github_api.ActivitySummary] = []
-  let issues : Array[@github_api.ActivitySummary] = []
+  let mut pull_requests : Array[@github_api.ActivitySummary] = []
+  let mut issues : Array[@github_api.ActivitySummary] = []
   let suggested_repositories : Array[@github_api.RepositorySummary] = []
   let mut authenticated_login = ""
   let mut saved_token : String? = None
@@ -207,7 +221,10 @@ async fn main {
               sync_status = "Repository is already registered."
             }
           }
-          Err(error) => println("repository-register: \{error}")
+          Err(error) => {
+            sync_status = error
+            println("repository-register: \{error}")
+          }
         }
       3 => {
         let token = imgui_take_token()
@@ -259,6 +276,22 @@ async fn main {
           Ok(_) => println("ui-action: activity.open")
           Err(error) => println("shell: open failed: \{error}")
         }
+      5 => {
+        let repository = imgui_take_selected_repository()
+        model = @domain.update(model, @domain.Msg::RemoveRepository(repository))
+        pull_requests = without_repository(pull_requests, repository)
+        issues = without_repository(issues, repository)
+        match @repository_store.save_default(model.repositories()) {
+          Ok(_) => {
+            sync_status = "Removed \{repository} from Watched repositories."
+            println("ui-action: repository.remove")
+          }
+          Err(error) => {
+            sync_status = error
+            println("repository-store: save failed: \{error}")
+          }
+        }
+      }
       10 => {
         model = @domain.update(
           model,

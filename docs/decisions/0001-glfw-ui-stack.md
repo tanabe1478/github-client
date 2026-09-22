@@ -34,6 +34,17 @@ MoUIはsemantic observation/actionを標準提供する一方、Windows実Skia b
 
 Dear ImGuiのdefault skinは使用せず、GitHub Primer light themeを基準に一貫したthemeを適用する。neutral canvas、dark header、subtle border、blue link、green primary action、8px系spacing、明確なtypography hierarchyを共通部品として提供する。
 
+## Interaction design rules
+
+色はGitHub Primerを基準にし、操作設計はMaterial Design 3のcomponent guidanceに従う。
+
+- 主要操作はlabel付きbuttonとして常に見えるようにし、row click、double click、hoverだけに隠さない。
+- list itemは情報表示を主目的とし、項目単位の操作はtrailing actionへ置く。
+- 現在の状態は`Watched`などのlabelとdisabled stateで示す。
+- 破壊的な操作はprimary actionと色・位置を分ける。監視解除はデータを削除せず再追加可能なため、確認dialogではなく即時feedbackを返す。
+- action後は状態変化と結果messageを同じ画面で確認できるようにする。
+- keyboard focus、十分なtarget size、stable semantic IDを各actionに持たせる。
+
 ## Semantic verification
 
 Dear ImGuiにはMoUI相当のsemantic treeがないため、widget wrapperが描画と同時に次の情報を登録する。

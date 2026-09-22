@@ -113,6 +113,7 @@ extern "C" int github_client_imgui_init(GLFWwindow* window) {
 static char github_client_repository_input[256] = "";
 static char github_client_token_input[512] = "";
 static std::string github_client_selected_url;
+static std::string github_client_selected_repository;
 
 struct GithubClientRow {
   std::string label;
@@ -387,13 +388,35 @@ extern "C" int github_client_imgui_render(
       }
       ImGui::PopStyleColor();
       ImGui::TextDisabled("Watched: %d", repository_count);
+      if (!sync_status.empty()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", sync_status.c_str());
+      }
+      if (repositories.empty()) {
+        ImGui::TextDisabled("No repositories are watched yet.");
+      }
       for (const GithubClientRow& repository : repositories) {
-        ImGui::BulletText("%s", repository.label.c_str());
+        const float right_edge =
+          ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(repository.label.c_str());
+        ImGui::SameLine(right_edge - 100.0f);
+        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(207, 34, 46, 255));
+        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(246, 248, 250, 255));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(255, 235, 233, 255));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(255, 206, 203, 255));
+        const std::string remove_id = "Remove##watched.remove." + repository.label;
+        if (ImGui::Button(remove_id.c_str(), ImVec2(100.0f, 34.0f))) {
+          github_client_selected_repository = repository.label;
+          action = 5;
+        }
+        ImGui::PopStyleColor(4);
+        ImGui::Separator();
       }
       ImGui::Spacing();
       ImGui::Separator();
       ImGui::TextUnformatted("Your repositories");
-      ImGui::TextDisabled("Select a repository to add it to Watched repositories.");
+      ImGui::TextDisabled("Use the explicit Watch action to add a repository.");
       if (suggested_repositories.empty()) {
         ImGui::TextDisabled("No repository suggestions are available for this token.");
       }
@@ -411,20 +434,31 @@ extern "C" int github_client_imgui_render(
             break;
           }
         }
-        const std::string label = suggestion.label +
-          (watched ? "  (Watched)" : "") + "##suggestion." + suggestion.url;
-        const ImGuiSelectableFlags flags = watched
-          ? ImGuiSelectableFlags_Disabled
-          : ImGuiSelectableFlags_None;
-        if (ImGui::Selectable(label.c_str(), false, flags, ImVec2(0.0f, 38.0f))) {
-          std::snprintf(
-            github_client_repository_input,
-            sizeof(github_client_repository_input),
-            "%s",
-            suggestion.url.c_str()
-          );
-          action = 2;
+        const float right_edge =
+          ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(suggestion.label.c_str());
+        ImGui::SameLine(right_edge - 100.0f);
+        if (watched) {
+          ImGui::BeginDisabled();
+          const std::string watched_id = "Watched##suggestion." + suggestion.url;
+          ImGui::Button(watched_id.c_str(), ImVec2(100.0f, 34.0f));
+          ImGui::EndDisabled();
+        } else {
+          ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
+          const std::string watch_id = "Watch##suggestion." + suggestion.url;
+          if (ImGui::Button(watch_id.c_str(), ImVec2(100.0f, 34.0f))) {
+            std::snprintf(
+              github_client_repository_input,
+              sizeof(github_client_repository_input),
+              "%s",
+              suggestion.url.c_str()
+            );
+            action = 2;
+          }
+          ImGui::PopStyleColor();
         }
+        ImGui::Separator();
       }
     } else {
       std::vector<GithubClientRow> visible_rows;
@@ -507,6 +541,18 @@ extern "C" moonbit_string_t github_client_imgui_take_repository(void) {
     );
   }
   github_client_repository_input[0] = '\0';
+  return result;
+}
+
+extern "C" moonbit_string_t github_client_imgui_take_selected_repository(void) {
+  const size_t length = github_client_selected_repository.size();
+  moonbit_string_t result = moonbit_make_string(length, 0);
+  for (size_t index = 0; index < length; ++index) {
+    result[index] = static_cast<uint16_t>(
+      static_cast<unsigned char>(github_client_selected_repository[index])
+    );
+  }
+  github_client_selected_repository.clear();
   return result;
 }
 

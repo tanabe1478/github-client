@@ -27,6 +27,9 @@ extern "C" fn github_client_imgui_take_token() -> String = "github_client_imgui_
 extern "C" fn github_client_imgui_take_url() -> String = "github_client_imgui_take_url"
 
 ///|
+extern "C" fn github_client_imgui_take_selected_repository() -> String = "github_client_imgui_take_selected_repository"
+
+///|
 extern "C" fn github_client_imgui_shutdown() -> Unit = "github_client_imgui_shutdown"
 
 ///|
@@ -78,6 +81,11 @@ fn imgui_take_token() -> String {
 ///|
 fn imgui_take_url() -> String {
   github_client_imgui_take_url()
+}
+
+///|
+fn imgui_take_selected_repository() -> String {
+  github_client_imgui_take_selected_repository()
 }
 
 ///|

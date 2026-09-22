@@ -12,6 +12,7 @@ pub(all) enum Msg {
   Navigate(Page)
   RequestSignIn
   RegisterRepository(RepositoryRef)
+  RemoveRepository(String)
 }
 
 ///|
@@ -60,6 +61,19 @@ pub fn update(model : Model, msg : Msg) -> Model {
       let repositories = model.repositories.copy()
       if !repositories.any(item => item.key() == repository.key()) {
         repositories.push(repository)
+      }
+      {
+        page: model.page,
+        sign_in_requests: model.sign_in_requests,
+        repositories,
+      }
+    }
+    RemoveRepository(key) => {
+      let repositories : Array[RepositoryRef] = []
+      for repository in model.repositories {
+        if repository.key() != key {
+          repositories.push(repository)
+        }
       }
       {
         page: model.page,

@@ -25,6 +25,28 @@ test "sign-in requests are counted" {
 }
 
 ///|
+test "watched repository can be removed" {
+  let repository = RepositoryRef::new("tanabe1478", "github-client")
+  let registered = update(Model::new(), Msg::RegisterRepository(repository))
+  let removed = update(
+    registered,
+    Msg::RemoveRepository("tanabe1478/github-client"),
+  )
+  inspect(removed.repositories().length(), content="0")
+}
+
+///|
+test "removing an unknown repository preserves watched repositories" {
+  let repository = RepositoryRef::new("tanabe1478", "github-client")
+  let registered = update(Model::new(), Msg::RegisterRepository(repository))
+  let unchanged = update(registered, Msg::RemoveRepository("other/repository"))
+  inspect(
+    unchanged.repositories().map(item => item.key()).join(","),
+    content="tanabe1478/github-client",
+  )
+}
+
+///|
 test "repository registration is idempotent" {
   let repository = RepositoryRef::new("tanabe1478", "github-client")
   let once = update(Model::new(), Msg::RegisterRepository(repository))
