@@ -7,7 +7,7 @@
 表示対象:
 
 1. 登録repositoryのpull requestとissue
-2. ユーザーへのmentionと参加中threadの更新
+2. `For you`に分離したmention、assignment、review request、subscribed thread
 3. 登録repositoryが依存するrepositoryのpull requestとissueのうち、登録repositoryへ影響するもの
 
 すべてのdependency repository activityを通知するとnoiseになるため、dependency側は関連理由を説明できる項目だけを採用する。
@@ -36,7 +36,8 @@
 初期endpoint:
 
 - `GET /user`
-- `GET /search/issues`（Fine-grained PATで取得可能なmention/relevance query）
+- `GET /issues`（assignment、mention、subscription）
+- `GET /search/issues`（review requestとrelevance query）
 - `GET /repos/{owner}/{repo}`
 - `GET /repos/{owner}/{repo}/issues`
 - `GET /repos/{owner}/{repo}/pulls`
@@ -50,7 +51,7 @@
 2. PATをアプリ画面からDPAPI/Keychainで暗号化保存 **完了**
 3. 保存したPATを使った`GET /user`接続 **完了**
 4. 登録repositoryのissue/pull取得と一覧表示 **完了**
-5. searchによるmentionを統合したInbox
+5. mention、assignment、review request、subscriptionを`For you`へ統合 **完了**
 6. SBOMからdependency候補を抽出
 7. dependency repositoryの関連判定
 8. polling、既読、desktop notification

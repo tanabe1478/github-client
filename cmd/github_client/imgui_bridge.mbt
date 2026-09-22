@@ -3,7 +3,7 @@
 extern "C" fn github_client_imgui_init(window : @glfw.GLFWwindow) -> Int = "github_client_imgui_init"
 
 ///|
-#borrow(window, repositories, suggested_repositories, pull_requests, issues, sync_status)
+#borrow(window, repositories, suggested_repositories, pull_requests, issues, personal_activity, sync_status)
 extern "C" fn github_client_imgui_render(
   window : @glfw.GLFWwindow,
   page : Int,
@@ -14,6 +14,7 @@ extern "C" fn github_client_imgui_render(
   suggested_repositories : String,
   pull_requests : String,
   issues : String,
+  personal_activity : String,
   sync_status : String,
 ) -> Int = "github_client_imgui_render"
 
@@ -48,6 +49,7 @@ fn imgui_render(
   suggested_repositories : String,
   pull_requests : String,
   issues : String,
+  personal_activity : String,
   sync_status : String,
 ) -> Int {
   github_client_imgui_render(
@@ -64,6 +66,7 @@ fn imgui_render(
     suggested_repositories,
     pull_requests,
     issues,
+    personal_activity,
     sync_status,
   )
 }

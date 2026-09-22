@@ -69,7 +69,7 @@ try {
 
   # Authentication controls live only on Settings. Verify that the native
   # navigation reaches that page; PAT entry itself remains masked.
-  $SettingsPoint = [IntPtr](389 * 65536 + 96)
+  $SettingsPoint = [IntPtr](445 * 65536 + 96)
   $null = [GithubClientInteraction]::PostMessage($Process.MainWindowHandle, 0x0200, [IntPtr]::Zero, $SettingsPoint)
   $null = [GithubClientInteraction]::PostMessage($Process.MainWindowHandle, 0x0201, [IntPtr]1, $SettingsPoint)
   $null = [GithubClientInteraction]::PostMessage($Process.MainWindowHandle, 0x0202, [IntPtr]::Zero, $SettingsPoint)

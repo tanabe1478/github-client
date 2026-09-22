@@ -227,6 +227,7 @@ extern "C" int github_client_imgui_render(
   uint16_t* suggested_repositories_text,
   uint16_t* pull_requests_text,
   uint16_t* issues_text,
+  uint16_t* personal_activity_text,
   uint16_t* sync_status_text
 ) {
   ImGui_ImplOpenGL3_NewFrame();
@@ -243,28 +244,34 @@ extern "C" int github_client_imgui_render(
     github_client_parse_rows(pull_requests_text);
   const std::vector<GithubClientRow> issues =
     github_client_parse_rows(issues_text);
+  const std::vector<GithubClientRow> personal_activity =
+    github_client_parse_rows(personal_activity_text);
   const std::string sync_status = github_client_utf16_to_utf8(sync_status_text);
-  if (page < 0 || page > 4) {
+  if (page < 0 || page > 5) {
     page = 0;
   }
   const char* page_titles[] = {
-    "Inbox", "Repositories", "Pull requests", "Issues", "Settings"
+    "Inbox", "Repositories", "Pull requests", "Issues", "Settings", "For you"
   };
   const char* page_descriptions[] = {
-    "Relevant activity from registered repositories and their dependencies.",
+    "Activity from Watched repositories and their dependencies.",
     "Choose repositories to watch or select one from your GitHub account.",
     "Review relevant pull requests across monitored repositories.",
-    "Track relevant issues and mentions in one place.",
-    "Manage authentication and application preferences."
+    "Track issues from Watched repositories in one place.",
+    "Manage authentication and application preferences.",
+    "Mentions, assignments, review requests, and subscribed threads."
   };
   const char* recent_titles[] = {
-    "Relevant activity", "Watched repositories", "Relevant pull requests", "Relevant issues"
+    "Watched activity", "Watched repositories", "Relevant pull requests",
+    "Relevant issues", "Credential", "Items involving you"
   };
   const char* empty_messages[] = {
-    "Nothing relevant needs your attention.",
+    "No Watched repository activity needs your attention.",
     "No repositories registered yet.",
     "No relevant pull requests found.",
-    "No relevant issues found."
+    "No relevant issues found.",
+    "No credential is configured.",
+    "No mentions, assignments, review requests, or subscriptions were found."
   };
   ImGuiIO& io = ImGui::GetIO();
   ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
@@ -306,6 +313,10 @@ extern "C" int github_client_imgui_render(
   if (ImGui::Selectable("  Inbox##nav.inbox", page == 0, 0,
                         ImVec2(0.0f, 44.0f))) {
     action = 10;
+  }
+  if (ImGui::Selectable("  For you##nav.for-you", page == 5, 0,
+                        ImVec2(0.0f, 44.0f))) {
+    action = 15;
   }
   if (ImGui::Selectable("  Repositories##nav.repositories", page == 1, 0,
                         ImVec2(0.0f, 44.0f))) {
@@ -469,6 +480,8 @@ extern "C" int github_client_imgui_render(
         visible_rows = pull_requests;
       } else if (page == 3) {
         visible_rows = issues;
+      } else if (page == 5) {
+        visible_rows = personal_activity;
       }
       if (visible_rows.empty()) {
         ImGui::TextDisabled("%s", empty_messages[page]);

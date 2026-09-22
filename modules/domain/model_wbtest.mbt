@@ -8,6 +8,13 @@ test "navigation preserves sign-in state" {
 }
 
 ///|
+test "for-you navigation is distinct from inbox" {
+  let for_you = update(Model::new(), Msg::Navigate(Page::ForYou))
+  inspect(for_you.page().name(), content="ForYou")
+  inspect(for_you.page().code(), content="5")
+}
+
+///|
 test "settings navigation preserves application state" {
   let repository = RepositoryRef::new("tanabe1478", "github-client")
   let registered = update(Model::new(), Msg::RegisterRepository(repository))

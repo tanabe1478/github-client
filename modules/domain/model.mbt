@@ -5,6 +5,7 @@ pub(all) enum Page {
   PullRequests
   Issues
   Settings
+  ForYou
 }
 
 ///|
@@ -92,6 +93,7 @@ pub fn Page::code(self : Page) -> Int {
     PullRequests => 2
     Issues => 3
     Settings => 4
+    ForYou => 5
   }
 }
 
@@ -103,5 +105,6 @@ pub fn Page::name(self : Page) -> String {
     PullRequests => "PullRequests"
     Issues => "Issues"
     Settings => "Settings"
+    ForYou => "ForYou"
   }
 }

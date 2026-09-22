@@ -12,6 +12,16 @@ pub fn owned_repositories_path(page : Int) -> String {
 }
 
 ///|
+pub fn personal_issues_path(filter : String, page : Int) -> String {
+  "/issues?filter=\{filter}&state=open&sort=updated&direction=desc&per_page=100&page=\{page}"
+}
+
+///|
+pub fn review_requests_search_path(login : String) -> String {
+  "/search/issues?q=is%3Aopen+is%3Apr+review-requested%3A\{login}&sort=updated&order=desc&per_page=50"
+}
+
+///|
 pub fn repository_path(owner : String, name : String) -> String {
   "/repos/\{owner}/\{name}"
 }

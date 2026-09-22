@@ -38,6 +38,102 @@ fn activity_rows(activities : Array[@github_api.ActivitySummary]) -> String {
 }
 
 ///|
+struct PersonalRow {
+  activity : @github_api.ActivitySummary
+  reasons : Array[String]
+}
+
+///|
+fn merge_personal_rows(
+  rows : Array[PersonalRow],
+  indices : Map[String, Int],
+  activities : Array[@github_api.ActivitySummary],
+  reason : String,
+) -> Unit {
+  for activity in activities {
+    match indices.get(activity.html_url()) {
+      Some(index) =>
+        if !rows[index].reasons.contains(reason) {
+          rows[index].reasons.push(reason)
+        }
+      None => {
+        indices.set(activity.html_url(), rows.length())
+        rows.push({ activity, reasons: [reason], })
+      }
+    }
+  }
+}
+
+///|
+fn personal_activity_rows(
+  review_requests : Array[@github_api.ActivitySummary],
+  assignments : Array[@github_api.ActivitySummary],
+  mentions : Array[@github_api.ActivitySummary],
+  subscriptions : Array[@github_api.ActivitySummary],
+) -> String {
+  let rows : Array[PersonalRow] = []
+  let indices : Map[String, Int] = Map([])
+  merge_personal_rows(rows, indices, review_requests, "Review requested")
+  merge_personal_rows(rows, indices, assignments, "Assigned")
+  merge_personal_rows(rows, indices, mentions, "Mentioned")
+  merge_personal_rows(rows, indices, subscriptions, "Subscribed")
+  rows
+  .map(row => {
+    let activity = row.activity
+    let label = safe_row_text(
+      "[\{row.reasons.join(", ")}] \{activity.repository()} #\{activity.number()}  \{activity.title()}  · @\{activity.author()}",
+    )
+    "\{label}\t\{activity.html_url()}"
+  })
+  .join("\n")
+}
+
+///|
+async fn fetch_personal_activity(
+  token : String,
+  login : String,
+  review_requests : Array[@github_api.ActivitySummary],
+  assignments : Array[@github_api.ActivitySummary],
+  mentions : Array[@github_api.ActivitySummary],
+  subscriptions : Array[@github_api.ActivitySummary],
+) -> String? {
+  let errors : Array[String] = []
+  match @github_api.search_review_requests(token, login) {
+    Ok(items) => {
+      println("github-personal-activity: review-requests=\{items.length()}")
+      review_requests.append(items)
+    }
+    Err(error) => errors.push("review requests: \{error}")
+  }
+  match @github_api.search_assignments(token, login) {
+    Ok(items) => {
+      println("github-personal-activity: assignments=\{items.length()}")
+      assignments.append(items)
+    }
+    Err(error) => errors.push("assignments: \{error}")
+  }
+  match @github_api.search_mentions(token, login) {
+    Ok(items) => {
+      println("github-personal-activity: mentions=\{items.length()}")
+      mentions.append(items)
+    }
+    Err(error) => errors.push("mentions: \{error}")
+  }
+  match @github_api.list_subscribed_issues(token) {
+    Ok(items) => {
+      println("github-personal-activity: subscriptions=\{items.length()}")
+      subscriptions.append(items)
+    }
+    Err(error) => errors.push("subscriptions: \{error}")
+  }
+  if errors.is_empty() {
+    None
+  } else {
+    Some("For you: \{errors.join(", ")}")
+  }
+}
+
+///|
 fn without_repository(
   activities : Array[@github_api.ActivitySummary],
   repository : String,
@@ -105,6 +201,10 @@ async fn main {
   let mut pull_requests : Array[@github_api.ActivitySummary] = []
   let mut issues : Array[@github_api.ActivitySummary] = []
   let suggested_repositories : Array[@github_api.RepositorySummary] = []
+  let review_requests : Array[@github_api.ActivitySummary] = []
+  let assignments : Array[@github_api.ActivitySummary] = []
+  let mentions : Array[@github_api.ActivitySummary] = []
+  let subscriptions : Array[@github_api.ActivitySummary] = []
   let mut authenticated_login = ""
   let mut saved_token : String? = None
   let mut sync_status = "Add a token to load GitHub activity."
@@ -127,6 +227,17 @@ async fn main {
               sync_status = "Repository suggestions: \{error}"
               println("github-repositories: \{error}")
             }
+          }
+          match
+            fetch_personal_activity(
+              token, authenticated_login, review_requests, assignments, mentions,
+              subscriptions,
+            ) {
+            Some(error) => {
+              sync_status = error
+              println("github-personal-activity: \{error}")
+            }
+            None => ()
           }
           for repository in model.repositories() {
             match
@@ -185,6 +296,9 @@ async fn main {
       suggested_repository_rows(suggested_repositories),
       activity_rows(pull_requests),
       activity_rows(issues),
+      personal_activity_rows(
+        review_requests, assignments, mentions, subscriptions,
+      ),
       sync_status,
     )
     match action {
@@ -239,6 +353,10 @@ async fn main {
                 pull_requests.clear()
                 issues.clear()
                 suggested_repositories.clear()
+                review_requests.clear()
+                assignments.clear()
+                mentions.clear()
+                subscriptions.clear()
                 match @github_api.list_owned_repositories(token) {
                   Ok(repositories) => {
                     println(
@@ -247,6 +365,14 @@ async fn main {
                     suggested_repositories.append(repositories)
                   }
                   Err(error) => sync_status = "Repository suggestions: \{error}"
+                }
+                match
+                  fetch_personal_activity(
+                    token, authenticated_login, review_requests, assignments, mentions,
+                    subscriptions,
+                  ) {
+                  Some(error) => sync_status = error
+                  None => ()
                 }
                 for repository in model.repositories() {
                   match
@@ -326,6 +452,13 @@ async fn main {
           @domain.Msg::Navigate(@domain.Page::Settings),
         )
         println("ui-action: nav.settings")
+      }
+      15 => {
+        model = @domain.update(
+          model,
+          @domain.Msg::Navigate(@domain.Page::ForYou),
+        )
+        println("ui-action: nav.for-you")
       }
       _ => ()
     }
