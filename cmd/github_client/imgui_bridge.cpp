@@ -2,7 +2,10 @@
 #include <GLFW/glfw3.h>
 #include <moonbit.h>
 
+#include <cstdint>
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include "../../vendor/imgui/imgui.cpp"
 #include "../../vendor/imgui/imgui_draw.cpp"
@@ -102,13 +105,100 @@ extern "C" int github_client_imgui_init(GLFWwindow* window) {
 
 static char github_client_repository_input[256] = "";
 static char github_client_token_input[512] = "";
+static std::string github_client_selected_url;
+
+struct GithubClientRow {
+  std::string label;
+  std::string url;
+};
+
+static std::string github_client_utf16_to_utf8(const uint16_t* source) {
+  std::string result;
+  size_t index = 0;
+  while (source != nullptr && source[index] != 0) {
+    uint32_t codepoint = source[index++];
+    if (codepoint >= 0xD800 && codepoint <= 0xDBFF) {
+      const uint32_t low = source[index];
+      if (low >= 0xDC00 && low <= 0xDFFF) {
+        ++index;
+        codepoint = 0x10000 + ((codepoint - 0xD800) << 10) + (low - 0xDC00);
+      } else {
+        codepoint = 0xFFFD;
+      }
+    } else if (codepoint >= 0xDC00 && codepoint <= 0xDFFF) {
+      codepoint = 0xFFFD;
+    }
+
+    if (codepoint <= 0x7F) {
+      result.push_back(static_cast<char>(codepoint));
+    } else if (codepoint <= 0x7FF) {
+      result.push_back(static_cast<char>(0xC0 | (codepoint >> 6)));
+      result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    } else if (codepoint <= 0xFFFF) {
+      result.push_back(static_cast<char>(0xE0 | (codepoint >> 12)));
+      result.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+      result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    } else {
+      result.push_back(static_cast<char>(0xF0 | (codepoint >> 18)));
+      result.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+      result.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+      result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    }
+  }
+  return result;
+}
+
+static std::vector<GithubClientRow> github_client_parse_rows(
+  const uint16_t* source
+) {
+  const std::string payload = github_client_utf16_to_utf8(source);
+  std::vector<GithubClientRow> rows;
+  size_t start = 0;
+  while (start < payload.size()) {
+    const size_t end = payload.find('\n', start);
+    const std::string line = payload.substr(
+      start,
+      end == std::string::npos ? std::string::npos : end - start
+    );
+    if (!line.empty()) {
+      const size_t separator = line.find('\t');
+      rows.push_back({
+        line.substr(0, separator),
+        separator == std::string::npos ? "" : line.substr(separator + 1)
+      });
+    }
+    if (end == std::string::npos) {
+      break;
+    }
+    start = end + 1;
+  }
+  return rows;
+}
+
+static void github_client_render_activity_rows(
+  const std::vector<GithubClientRow>& rows,
+  int* action
+) {
+  for (const GithubClientRow& row : rows) {
+    const std::string id = row.label + "##activity." + row.url;
+    if (ImGui::Selectable(id.c_str(), false, ImGuiSelectableFlags_None,
+                          ImVec2(0.0f, 38.0f))) {
+      github_client_selected_url = row.url;
+      *action = 4;
+    }
+  }
+}
 
 extern "C" int github_client_imgui_render(
   GLFWwindow* window,
   int page,
   int sign_in_requests,
   int repository_count,
-  int has_saved_token
+  int has_saved_token,
+  uint16_t* repositories_text,
+  uint16_t* pull_requests_text,
+  uint16_t* issues_text,
+  uint16_t* sync_status_text
 ) {
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplGlfw_NewFrame();
@@ -116,6 +206,13 @@ extern "C" int github_client_imgui_render(
 
   int action = 0;
   bool open_pat_popup = false;
+  const std::vector<GithubClientRow> repositories =
+    github_client_parse_rows(repositories_text);
+  const std::vector<GithubClientRow> pull_requests =
+    github_client_parse_rows(pull_requests_text);
+  const std::vector<GithubClientRow> issues =
+    github_client_parse_rows(issues_text);
+  const std::string sync_status = github_client_utf16_to_utf8(sync_status_text);
   if (page < 0 || page > 3) {
     page = 0;
   }
@@ -203,7 +300,7 @@ extern "C" int github_client_imgui_render(
   ImGui::Dummy(ImVec2(0.0f, 10.0f));
 
   const float card_width = ImGui::GetContentRegionAvail().x;
-  ImGui::BeginChild("##welcome.card", ImVec2(card_width, 226.0f),
+  ImGui::BeginChild("##welcome.card", ImVec2(card_width, 190.0f),
                     ImGuiChildFlags_Borders);
   ImGui::TextUnformatted(
     has_saved_token ? "GitHub credential is protected" : "Connect your GitHub account"
@@ -227,10 +324,13 @@ extern "C" int github_client_imgui_render(
   ImGui::SameLine();
   ImGui::AlignTextToFramePadding();
   ImGui::TextDisabled("Interaction count: %d", sign_in_requests);
+  if (!sync_status.empty()) {
+    ImGui::TextDisabled("%s", sync_status.c_str());
+  }
   ImGui::EndChild();
 
   ImGui::Dummy(ImVec2(0.0f, 12.0f));
-  ImGui::BeginChild("##recent.card", ImVec2(card_width, 150.0f),
+  ImGui::BeginChild("##recent.card", ImGui::GetContentRegionAvail(),
                     ImGuiChildFlags_Borders);
   ImGui::TextUnformatted(recent_titles[page]);
   ImGui::Separator();
@@ -249,8 +349,25 @@ extern "C" int github_client_imgui_render(
     }
     ImGui::PopStyleColor();
     ImGui::TextDisabled("Registered: %d", repository_count);
+    ImGui::Separator();
+    for (const GithubClientRow& repository : repositories) {
+      ImGui::BulletText("%s", repository.label.c_str());
+    }
   } else {
-    ImGui::TextDisabled("%s", empty_messages[page]);
+    std::vector<GithubClientRow> visible_rows;
+    if (page == 0) {
+      visible_rows.insert(visible_rows.end(), pull_requests.begin(), pull_requests.end());
+      visible_rows.insert(visible_rows.end(), issues.begin(), issues.end());
+    } else if (page == 2) {
+      visible_rows = pull_requests;
+    } else if (page == 3) {
+      visible_rows = issues;
+    }
+    if (visible_rows.empty()) {
+      ImGui::TextDisabled("%s", empty_messages[page]);
+    } else {
+      github_client_render_activity_rows(visible_rows, &action);
+    }
   }
   ImGui::EndChild();
   ImGui::EndChild();
@@ -312,6 +429,18 @@ extern "C" moonbit_string_t github_client_imgui_take_repository(void) {
     );
   }
   github_client_repository_input[0] = '\0';
+  return result;
+}
+
+extern "C" moonbit_string_t github_client_imgui_take_url(void) {
+  const size_t length = github_client_selected_url.size();
+  moonbit_string_t result = moonbit_make_string(length, 0);
+  for (size_t index = 0; index < length; ++index) {
+    result[index] = static_cast<uint16_t>(
+      static_cast<unsigned char>(github_client_selected_url[index])
+    );
+  }
+  github_client_selected_url.clear();
   return result;
 }
 

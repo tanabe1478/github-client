@@ -1,18 +1,116 @@
 ///|
+fn safe_row_text(value : String) -> String {
+  value
+  .replace_all(old="\r", new=" ")
+  .replace_all(old="\n", new=" ")
+  .replace_all(old="\t", new=" ")
+}
+
+///|
+fn repository_rows(repositories : Array[@domain.RepositoryRef]) -> String {
+  repositories.map(repository => repository.key()).join("\n")
+}
+
+///|
+fn activity_rows(activities : Array[@github_api.ActivitySummary]) -> String {
+  activities
+  .map(activity => {
+    let draft = if activity.is_draft() { " [draft]" } else { "" }
+    let label = safe_row_text(
+      "\{activity.repository()} #\{activity.number()}\{draft}  \{activity.title()}  · @\{activity.author()}",
+    )
+    "\{label}\t\{activity.html_url()}"
+  })
+  .join("\n")
+}
+
+///|
+async fn fetch_repository_activity(
+  token : String,
+  repository : @domain.RepositoryRef,
+  pull_requests : Array[@github_api.ActivitySummary],
+  issues : Array[@github_api.ActivitySummary],
+) -> String? {
+  let errors : Array[String] = []
+  match
+    @github_api.list_open_pull_requests(
+      token,
+      repository.owner(),
+      repository.name(),
+    ) {
+    Ok(items) => {
+      println(
+        "github-activity: \{repository.key()} pull-requests=\{items.length()}",
+      )
+      pull_requests.append(items)
+    }
+    Err(error) => errors.push("pull requests: \{error}")
+  }
+  match
+    @github_api.list_open_issues(token, repository.owner(), repository.name()) {
+    Ok(items) => {
+      println("github-activity: \{repository.key()} issues=\{items.length()}")
+      issues.append(items)
+    }
+    Err(error) => errors.push("issues: \{error}")
+  }
+  if errors.is_empty() {
+    None
+  } else {
+    Some("\{repository.key()}: \{errors.join(", ")}")
+  }
+}
+
+///|
 async fn main {
   println("github-client: starting GLFW + Dear ImGui host")
+  let mut model = @domain.Model::new()
+  match @repository_store.load_default() {
+    Ok(repositories) =>
+      for repository in repositories {
+        model = @domain.update(
+          model,
+          @domain.Msg::RegisterRepository(repository),
+        )
+      }
+    Err(error) => println("repository-store: load failed: \{error}")
+  }
+  let pull_requests : Array[@github_api.ActivitySummary] = []
+  let issues : Array[@github_api.ActivitySummary] = []
   let mut authenticated_login = ""
+  let mut saved_token : String? = None
+  let mut sync_status = "Add a token to load GitHub activity."
   match @credential_store.load_token() {
     Ok(Some(token)) =>
       match @github_api.get_authenticated_user(token) {
         Ok(user) => {
           authenticated_login = user.login()
+          saved_token = Some(token)
+          sync_status = "Connected as @\{authenticated_login}."
           println("github-authenticated: \{authenticated_login}")
+          for repository in model.repositories() {
+            match
+              fetch_repository_activity(
+                token, repository, pull_requests, issues,
+              ) {
+              Some(error) => {
+                sync_status = error
+                println("github-activity: \{error}")
+              }
+              None => ()
+            }
+          }
         }
-        Err(error) => println("github-authentication: \{error}")
+        Err(error) => {
+          sync_status = error
+          println("github-authentication: \{error}")
+        }
       }
     Ok(None) => ()
-    Err(error) => println("credential-store: load failed: \{error}")
+    Err(error) => {
+      sync_status = error
+      println("credential-store: load failed: \{error}")
+    }
   }
   if !@glfw.glfw_init() {
     println("github-client: GLFW initialization failed")
@@ -34,18 +132,7 @@ async fn main {
     return
   }
 
-  let mut model = @domain.Model::new()
   let mut has_saved_token = @credential_store.has_saved_token()
-  match @repository_store.load_default() {
-    Ok(repositories) =>
-      for repository in repositories {
-        model = @domain.update(
-          model,
-          @domain.Msg::RegisterRepository(repository),
-        )
-      }
-    Err(error) => println("repository-store: load failed: \{error}")
-  }
   while !@glfw.window_should_close(window) {
     @glfw.poll_events()
     let action = imgui_render(
@@ -54,6 +141,10 @@ async fn main {
       model.sign_in_requests(),
       model.repositories().length(),
       has_saved_token,
+      repository_rows(model.repositories()),
+      activity_rows(pull_requests),
+      activity_rows(issues),
+      sync_status,
     )
     match action {
       1 => {
@@ -63,6 +154,7 @@ async fn main {
       2 =>
         match @domain.RepositoryRef::parse(imgui_take_repository()) {
           Ok(repository) => {
+            let previous_count = model.repositories().length()
             model = @domain.update(
               model,
               @domain.Msg::RegisterRepository(repository),
@@ -71,16 +163,64 @@ async fn main {
               Ok(_) => println("ui-action: repository.register")
               Err(error) => println("repository-store: save failed: \{error}")
             }
+            if model.repositories().length() > previous_count {
+              match saved_token {
+                Some(token) =>
+                  match
+                    fetch_repository_activity(
+                      token, repository, pull_requests, issues,
+                    ) {
+                    Some(error) => sync_status = error
+                    None => sync_status = "Repository activity loaded."
+                  }
+                None =>
+                  sync_status = "Repository saved. Add a token to load activity."
+              }
+            } else {
+              sync_status = "Repository is already registered."
+            }
           }
           Err(error) => println("repository-register: \{error}")
         }
-      3 =>
-        match @credential_store.save_token(imgui_take_token()) {
+      3 => {
+        let token = imgui_take_token()
+        match @credential_store.save_token(token) {
           Ok(_) => {
             has_saved_token = true
-            println("ui-action: auth.pat-saved")
+            match @github_api.get_authenticated_user(token) {
+              Ok(user) => {
+                saved_token = Some(token)
+                authenticated_login = user.login()
+                sync_status = "Connected as @\{authenticated_login}."
+                pull_requests.clear()
+                issues.clear()
+                for repository in model.repositories() {
+                  match
+                    fetch_repository_activity(
+                      token, repository, pull_requests, issues,
+                    ) {
+                    Some(error) => sync_status = error
+                    None => ()
+                  }
+                }
+                println("ui-action: auth.pat-saved")
+              }
+              Err(error) => {
+                sync_status = error
+                println("github-authentication: \{error}")
+              }
+            }
           }
-          Err(error) => println("credential-store: save failed: \{error}")
+          Err(error) => {
+            sync_status = error
+            println("credential-store: save failed: \{error}")
+          }
+        }
+      }
+      4 =>
+        match @shell.open(imgui_take_url()) {
+          Ok(_) => println("ui-action: activity.open")
+          Err(error) => println("shell: open failed: \{error}")
         }
       10 => {
         model = @domain.update(

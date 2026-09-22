@@ -48,8 +48,8 @@
 
 1. repositoryを手動登録してlocal保存 **完了**
 2. PATをアプリ画面からDPAPI/Keychainで暗号化保存 **完了**
-3. 保存したPATを使った`GET /user`接続
-4. 登録repositoryのissue/pull取得
+3. 保存したPATを使った`GET /user`接続 **完了**
+4. 登録repositoryのissue/pull取得と一覧表示 **完了**
 5. searchによるmentionを統合したInbox
 6. SBOMからdependency候補を抽出
 7. dependency repositoryの関連判定

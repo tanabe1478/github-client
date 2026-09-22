@@ -1,9 +1,6 @@
 import {
   "moonbitlang/async/http",
+  "moonbitlang/core/json",
 }
 
 supported_targets = "native"
-
-options(
-  wbtest_import: [ "moonbitlang/core/json" ],
-)

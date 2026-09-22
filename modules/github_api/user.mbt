@@ -59,27 +59,8 @@ pub fn decode_authenticated_user(
 pub async fn get_authenticated_user(
   token : String,
 ) -> Result[AuthenticatedUser, String] {
-  let headers : @http.Headers = Map([])
-  headers.set(
-    @http.CaseInsensitiveString("Accept"),
-    "application/vnd.github+json",
-  )
-  headers.set(@http.CaseInsensitiveString("X-GitHub-Api-Version"), "2022-11-28")
-  headers.set(
-    @http.CaseInsensitiveString("User-Agent"),
-    "tanabe1478-github-client/0.1.0",
-  )
-  headers.set(@http.CaseInsensitiveString("Authorization"), "Bearer \{token}")
-  try {
-    let (response, body) = @http.get("https://api.github.com/user", headers~)
-    if response.code == 401 {
-      return Err("GitHub rejected the saved token")
-    }
-    if response.code < 200 || response.code >= 300 {
-      return Err("GitHub request failed with status \{response.code}")
-    }
-    decode_authenticated_user(body.json())
-  } catch {
-    _ => Err("GitHub request failed before a response was received")
+  match get_json(token, authenticated_user_path()) {
+    Ok(json) => decode_authenticated_user(json)
+    Err(error) => Err(error)
   }
 }

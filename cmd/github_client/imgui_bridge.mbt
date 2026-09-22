@@ -3,13 +3,17 @@
 extern "C" fn github_client_imgui_init(window : @glfw.GLFWwindow) -> Int = "github_client_imgui_init"
 
 ///|
-#borrow(window)
+#borrow(window, repositories, pull_requests, issues, sync_status)
 extern "C" fn github_client_imgui_render(
   window : @glfw.GLFWwindow,
   page : Int,
   sign_in_requests : Int,
   repository_count : Int,
   has_saved_token : Int,
+  repositories : String,
+  pull_requests : String,
+  issues : String,
+  sync_status : String,
 ) -> Int = "github_client_imgui_render"
 
 ///|
@@ -17,6 +21,9 @@ extern "C" fn github_client_imgui_take_repository() -> String = "github_client_i
 
 ///|
 extern "C" fn github_client_imgui_take_token() -> String = "github_client_imgui_take_token"
+
+///|
+extern "C" fn github_client_imgui_take_url() -> String = "github_client_imgui_take_url"
 
 ///|
 extern "C" fn github_client_imgui_shutdown() -> Unit = "github_client_imgui_shutdown"
@@ -33,6 +40,10 @@ fn imgui_render(
   sign_in_requests : Int,
   repository_count : Int,
   has_saved_token : Bool,
+  repositories : String,
+  pull_requests : String,
+  issues : String,
+  sync_status : String,
 ) -> Int {
   github_client_imgui_render(
     window,
@@ -44,6 +55,10 @@ fn imgui_render(
     } else {
       0
     },
+    repositories,
+    pull_requests,
+    issues,
+    sync_status,
   )
 }
 
@@ -55,6 +70,11 @@ fn imgui_take_repository() -> String {
 ///|
 fn imgui_take_token() -> String {
   github_client_imgui_take_token()
+}
+
+///|
+fn imgui_take_url() -> String {
+  github_client_imgui_take_url()
 }
 
 ///|

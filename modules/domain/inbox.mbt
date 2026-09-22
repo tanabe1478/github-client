@@ -10,6 +10,16 @@ pub fn RepositoryRef::new(owner : String, name : String) -> RepositoryRef {
 }
 
 ///|
+pub fn RepositoryRef::owner(self : RepositoryRef) -> String {
+  self.owner
+}
+
+///|
+pub fn RepositoryRef::name(self : RepositoryRef) -> String {
+  self.name
+}
+
+///|
 pub fn RepositoryRef::key(self : RepositoryRef) -> String {
   "\{self.owner}/\{self.name}"
 }
