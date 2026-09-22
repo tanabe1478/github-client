@@ -16,7 +16,7 @@ GLFWを製品window hostとして採用し、OpenGL 3 + Dear ImGuiを接続す�
 ## Stack
 
 - Window/input: [`tanabe1478/glfw-mbt`](https://github.com/tanabe1478/glfw-mbt)
-- GUI: Dear ImGui公式GLFW backend（Material UIを基準にした独自theme）
+- GUI: Dear ImGui公式GLFW backend（GitHub Primer light paletteを基準にした独自theme）
 - Native renderer: OpenGL 3（初期経路）
 - UI verification: Pure MoonBit state test + application semantic registry + screenshot
 - GitHub API: 必要なREST endpointだけを`github_api/`へ実装
@@ -51,7 +51,7 @@ $env:VCPKG_ROOT = "$HOME\vcpkg"
 .\scripts\windows\run.ps1
 ```
 
-ビルドのみの場合は`.\scripts\windows\run.ps1 -BuildOnly`を使用します。Material UI themeを含む実画面をartifactとして確認できます。
+ビルドのみの場合は`.\scripts\windows\run.ps1 -BuildOnly`を使用します。GitHub Primer風themeを含む実画面をartifactとして確認できます。
 
 ```powershell
 .\scripts\windows\run.ps1 -BuildOnly

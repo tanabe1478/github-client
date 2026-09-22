@@ -23,9 +23,9 @@ static void github_client_apply_material_theme() {
   style.ItemInnerSpacing = ImVec2(8.0f, 6.0f);
   style.ScrollbarSize = 12.0f;
   style.WindowRounding = 0.0f;
-  style.ChildRounding = 10.0f;
+  style.ChildRounding = 6.0f;
   style.FrameRounding = 6.0f;
-  style.PopupRounding = 8.0f;
+  style.PopupRounding = 6.0f;
   style.ScrollbarRounding = 8.0f;
   style.GrabRounding = 6.0f;
   style.TabRounding = 6.0f;
@@ -34,24 +34,29 @@ static void github_client_apply_material_theme() {
   style.FrameBorderSize = 0.0f;
 
   ImVec4* colors = style.Colors;
-  colors[ImGuiCol_Text] = ImVec4(0.13f, 0.13f, 0.13f, 1.0f);
-  colors[ImGuiCol_TextDisabled] = ImVec4(0.46f, 0.46f, 0.46f, 1.0f);
-  colors[ImGuiCol_WindowBg] = ImVec4(0.96f, 0.96f, 0.97f, 1.0f);
+  // GitHub Primer light palette: neutral canvas and borders, blue links,
+  // and green primary actions.
+  colors[ImGuiCol_Text] = ImVec4(0.122f, 0.137f, 0.157f, 1.0f);       // #1f2328
+  colors[ImGuiCol_TextDisabled] = ImVec4(0.349f, 0.388f, 0.431f, 1.0f); // #59636e
+  colors[ImGuiCol_WindowBg] = ImVec4(0.965f, 0.973f, 0.980f, 1.0f);   // #f6f8fa
   colors[ImGuiCol_ChildBg] = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-  colors[ImGuiCol_PopupBg] = ImVec4(1.0f, 1.0f, 1.0f, 0.98f);
-  colors[ImGuiCol_Border] = ImVec4(0.88f, 0.88f, 0.90f, 1.0f);
-  colors[ImGuiCol_FrameBg] = ImVec4(0.94f, 0.94f, 0.95f, 1.0f);
-  colors[ImGuiCol_FrameBgHovered] = ImVec4(0.89f, 0.93f, 0.98f, 1.0f);
-  colors[ImGuiCol_FrameBgActive] = ImVec4(0.82f, 0.89f, 0.97f, 1.0f);
-  colors[ImGuiCol_Button] = ImVec4(0.10f, 0.46f, 0.82f, 1.0f);
-  colors[ImGuiCol_ButtonHovered] = ImVec4(0.08f, 0.40f, 0.75f, 1.0f);
-  colors[ImGuiCol_ButtonActive] = ImVec4(0.06f, 0.34f, 0.68f, 1.0f);
-  colors[ImGuiCol_Header] = ImVec4(0.89f, 0.93f, 0.98f, 1.0f);
-  colors[ImGuiCol_HeaderHovered] = ImVec4(0.82f, 0.89f, 0.97f, 1.0f);
-  colors[ImGuiCol_HeaderActive] = ImVec4(0.73f, 0.84f, 0.95f, 1.0f);
-  colors[ImGuiCol_Separator] = ImVec4(0.88f, 0.88f, 0.90f, 1.0f);
-  colors[ImGuiCol_ScrollbarBg] = ImVec4(0.96f, 0.96f, 0.97f, 1.0f);
-  colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.70f, 0.70f, 0.73f, 1.0f);
+  colors[ImGuiCol_PopupBg] = ImVec4(1.0f, 1.0f, 1.0f, 0.99f);
+  colors[ImGuiCol_Border] = ImVec4(0.816f, 0.843f, 0.871f, 1.0f);     // #d0d7de
+  colors[ImGuiCol_FrameBg] = ImVec4(0.965f, 0.973f, 0.980f, 1.0f);
+  colors[ImGuiCol_FrameBgHovered] = ImVec4(0.918f, 0.933f, 0.949f, 1.0f);
+  colors[ImGuiCol_FrameBgActive] = ImVec4(0.867f, 0.957f, 1.0f, 1.0f);
+  colors[ImGuiCol_Button] = ImVec4(0.122f, 0.533f, 0.239f, 1.0f);     // #1f883d
+  colors[ImGuiCol_ButtonHovered] = ImVec4(0.102f, 0.498f, 0.216f, 1.0f);
+  colors[ImGuiCol_ButtonActive] = ImVec4(0.067f, 0.388f, 0.161f, 1.0f);
+  colors[ImGuiCol_Header] = ImVec4(0.867f, 0.957f, 1.0f, 1.0f);       // #ddf4ff
+  colors[ImGuiCol_HeaderHovered] = ImVec4(0.918f, 0.933f, 0.949f, 1.0f);
+  colors[ImGuiCol_HeaderActive] = ImVec4(0.741f, 0.902f, 1.0f, 1.0f);
+  colors[ImGuiCol_Separator] = ImVec4(0.816f, 0.843f, 0.871f, 1.0f);
+  colors[ImGuiCol_ScrollbarBg] = ImVec4(0.965f, 0.973f, 0.980f, 1.0f);
+  colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.686f, 0.725f, 0.765f, 1.0f);
+  colors[ImGuiCol_TitleBg] = ImVec4(0.965f, 0.973f, 0.980f, 1.0f);
+  colors[ImGuiCol_TitleBgActive] = ImVec4(0.965f, 0.973f, 0.980f, 1.0f);
+  colors[ImGuiCol_CheckMark] = ImVec4(0.035f, 0.412f, 0.855f, 1.0f);  // #0969da
 }
 
 static void github_client_load_fonts() {
@@ -181,11 +186,13 @@ static void github_client_render_activity_rows(
 ) {
   for (const GithubClientRow& row : rows) {
     const std::string id = row.label + "##activity." + row.url;
+    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(9, 105, 218, 255));
     if (ImGui::Selectable(id.c_str(), false, ImGuiSelectableFlags_None,
                           ImVec2(0.0f, 38.0f))) {
       github_client_selected_url = row.url;
       *action = 4;
     }
+    ImGui::PopStyleColor();
   }
 }
 
@@ -251,10 +258,10 @@ extern "C" int github_client_imgui_render(
   draw->AddRectFilled(
     origin,
     ImVec2(origin.x + io.DisplaySize.x, origin.y + 64.0f),
-    IM_COL32(25, 118, 210, 255)
+    IM_COL32(37, 41, 46, 255)
   );
   draw->AddCircleFilled(ImVec2(origin.x + 32.0f, origin.y + 32.0f), 17.0f,
-                        IM_COL32(255, 255, 255, 38));
+                        IM_COL32(255, 255, 255, 24));
 
   ImGui::SetCursorPos(ImVec2(22.0f, 20.0f));
   ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
@@ -300,7 +307,7 @@ extern "C" int github_client_imgui_render(
   ImGui::Dummy(ImVec2(0.0f, 10.0f));
 
   const float card_width = ImGui::GetContentRegionAvail().x;
-  ImGui::BeginChild("##welcome.card", ImVec2(card_width, 190.0f),
+  ImGui::BeginChild("##welcome.card", ImVec2(card_width, 210.0f),
                     ImGuiChildFlags_Borders);
   ImGui::TextUnformatted(
     has_saved_token ? "GitHub credential is protected" : "Connect your GitHub account"
@@ -402,10 +409,14 @@ extern "C" int github_client_imgui_render(
     }
     ImGui::PopStyleColor();
     ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(246, 248, 250, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(234, 238, 242, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(208, 215, 222, 255));
     if (ImGui::Button("Cancel##auth.pat-cancel", ImVec2(110.0f, 40.0f))) {
       github_client_token_input[0] = '\0';
       ImGui::CloseCurrentPopup();
     }
+    ImGui::PopStyleColor(3);
     ImGui::EndPopup();
   }
 

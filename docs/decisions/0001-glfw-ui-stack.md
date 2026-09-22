@@ -18,7 +18,7 @@ MoUIはsemantic observation/actionを標準提供する一方、Windows実Skia b
 - GUI: Dear ImGui本体、`imgui_impl_glfw`、`imgui_impl_opengl3`
 - MoonBit境界: Dear ImGuiのC++型を公開しない薄いC ABI bridge
 - Application state: Pure MoonBitのModel/update
-- Visual design: Material UIを基準にしたspacing、surface、color、typography
+- Visual design: GitHub Primerを基準にしたspacing、surface、color、typography
 - Verification: state test、application semantic registry、draw/screenshot smoke
 
 最初はOpenGL 3で統合面を小さくする。Windows固有の描画安定性が必要になった場合は、GLFWを維持したままD3D11 backendを比較する。
@@ -32,7 +32,7 @@ MoUIはsemantic observation/actionを標準提供する一方、Windows実Skia b
 
 ## Visual design
 
-Dear ImGuiのdefault skinは使用せず、Material UIを基準に一貫したthemeを適用する。OS native widgetの再現ではなく、app bar、navigation、surface/card、primary action、8px系spacing、明確なtypography hierarchyを共通部品として提供する。
+Dear ImGuiのdefault skinは使用せず、GitHub Primer light themeを基準に一貫したthemeを適用する。neutral canvas、dark header、subtle border、blue link、green primary action、8px系spacing、明確なtypography hierarchyを共通部品として提供する。
 
 ## Semantic verification
 
