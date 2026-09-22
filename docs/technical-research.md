@@ -16,8 +16,8 @@
 | 関心 | 採用候補 | 判断 |
 |---|---|---|
 | Window/input | [`mizchi/glfw`](https://github.com/mizchi/glfw-mbt) | 採用。Windows runtime smokeは実機で成功 |
-| UI core | [`moonbitstack/moonegui`](https://github.com/moonbitstack/moonegui) | 第一候補。ゲームエンジンではなく、描画backendを12操作に分離したPure MoonBit GUI |
-| Native rendering | Skia / NanoVG | 比較中。GLFW windowへのpresent経路を先に実証する |
+| GUI | [Dear ImGui](https://github.com/ocornut/imgui) | 採用。公式GLFW/OpenGL backendと一般環境での豊富な実績を優先 |
+| Native rendering | OpenGL 3 | 採用。GLFWがcontext lifecycleを直接提供し、最初の統合範囲が小さい |
 | GitHub REST API | [`mizchi/github`](https://github.com/mizchi/github) | 採用候補。クライアントを新規実装する必要はほぼない |
 | 一般HTTP | [`oboard/reqbest`](https://github.com/oboard/reqbest) | GitHub APIクライアントで足りない認証等の補助候補 |
 | JSON | `moonbitlang/core/json` | 採用 |
@@ -28,7 +28,7 @@
 
 Kaguraは調査対象には含めるが採用しない。ゲームエンジンのruntimeをデスクトップアプリの土台にするのではなく、GUI coreとrenderer/window hostを明示的に分離する。
 
-最大の未解決点は「GLFW windowへ、GUIに必要な文字・clip・pathを含む2D描画をどうpresentするか」である。
+最大の未解決点はDear ImGuiのC++ APIをMoonBitへ漏らさない薄いC ABI bridge、日本語IME、application semantic registryである。選定理由は[ADR 0001](decisions/0001-glfw-ui-stack.md)に記録した。
 
 ---
 
@@ -67,7 +67,17 @@ Rust eguiに着想を得たPure MoonBitのimmediate-mode GUI。
 - recording backendと177件のtestを持つ。
 - native backend、画像、data table、virtual list、複数windowはまだない。
 
-GLFWを維持する今回の第一候補。足りないwidgetはアプリ固有に閉じず、再利用可能ならupstream contributionを検討する。
+recording backendは魅力的だが、native renderer、table、virtual list、日本語text/IMEまで新規統合する範囲が大きい。GLFWを維持する構成ではDear ImGuiを優先し、mooneguiは不採用とする。
+
+#### Dear ImGui
+
+GLFWと組み合わせるGUIとして一般環境で最も実績が多い候補。公式の`imgui_impl_glfw`と`imgui_impl_opengl3`を利用し、MoonBitからはアプリ向けの薄いC ABIを呼ぶ。
+
+- table、scroll、tree、tab、popup、multiline inputが揃う。
+- 最初はOpenGL 3 core profileで統合し、必要ならWindows向けD3D11を比較する。
+- MoonBit向け既存bindingの成熟度には依存せず、Dear ImGui本体と公式backendをversion固定する。
+- MoUI相当のsemantics/accessibilityはないため、stable ID、role、value、actionを記録するapplication semantic registryを実装する。
+- 日本語font、IME、accessibilityは個別の受け入れ試験が必要。
 
 #### `wzzc-dev/MoUI`
 
@@ -78,7 +88,7 @@ MoonBitコミュニティで最も包括的な宣言的GUI候補。
 - GLFW backendは存在せず、desktopではMoUI自身のwindow lifecycleを使う。
 - GLFWを外せるなら非常に有力だが、今回のGLFW検証目的とは競合する。
 
-将来、GLFW要件を緩める場合の第一候補として残す。MoUIの設計とWindows hostは独自実装の参考にする。
+semantic observation/actionの設計はapplication semantic registryの参考にする。一方、Windows実Skia buildでC/C++標準flagの競合がありfirst frameが未検証であることと、GLFW資産を製品経路で活用する判断から不採用とする。
 
 #### `NoahLiu/moonbit-libyue`
 
@@ -310,12 +320,13 @@ Windowsではcurrent-user/per-machine/bothのNSIS install mode、payload、short
 ## 実装スパイクの順序
 
 1. **Window smoke**: forkした`glfw-mbt`でWindows windowを作成・終了する。**完了**
-2. **Renderer smoke**: GLFW window上で2D clear/rect/textをpresentする。
-3. **UI smoke**: mooneguiのbutton、scroll、textをnative描画する。
-4. **Async smoke**: 描画を止めずに`mizchi/github`でauthenticated userを取得する。
-5. **Auth storage smoke**: PATをDPAPIで暗号化・再読込・削除する。
-6. **Vertical slice**: repository listを取得し、scrollable listとして表示する。
-7. **Package smoke**: portable zipを別のWindows環境で起動する。
+2. **OpenGL context smoke**: GLFW windowでOpenGL 3 contextを作りbuffer swapする。
+3. **Dear ImGui smoke**: 公式GLFW/OpenGL backendでdemo、button、scroll、text inputを描画する。
+4. **Semantic smoke**: stable IDでbuttonを操作し、stateとsemantic snapshotを検証する。
+5. **Async smoke**: 描画を止めずに`mizchi/github`でauthenticated userを取得する。
+6. **Auth storage smoke**: PATをDPAPIで暗号化・再読込・削除する。
+7. **Vertical slice**: repository listを取得し、Dear ImGui tableとして表示する。
+8. **Package smoke**: portable zipを別のWindows環境で起動する。
 
 この順序なら、GLFW、WebGPU、UI、async runtime、TLS、secure storage、packagingの失敗点を分離できる。
 

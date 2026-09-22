@@ -6,18 +6,19 @@ MoonBitで実装するネイティブデスクトップ向けGitHubクライア�
 
 ## Status
 
-技術検証中です。現在の候補構成と調査結果は[技術調査](docs/technical-research.md)を参照してください。
+GLFWを製品window hostとして採用し、OpenGL 3 + Dear ImGuiを接続する方針です。選定理由は[ADR 0001](docs/decisions/0001-glfw-ui-stack.md)、調査全体は[技術調査](docs/technical-research.md)を参照してください。
 
 ## Related repositories
 
 - [`tanabe1478/glfw-mbt`](https://github.com/tanabe1478/glfw-mbt) — Windows向け修正を蓄積するfork
 - [`mizchi/glfw-mbt`](https://github.com/mizchi/glfw-mbt) — upstream
 
-## Tentative stack
+## Stack
 
-- Window/input: `mizchi/glfw`
-- UI core: `moonbitstack/moonegui`
-- Native renderer: 調査・実装中（Skia / NanoVGを比較）
+- Window/input: [`tanabe1478/glfw-mbt`](https://github.com/tanabe1478/glfw-mbt)
+- GUI: Dear ImGui公式GLFW backend
+- Native renderer: OpenGL 3（初期経路）
+- UI verification: Pure MoonBit state test + application semantic registry + screenshot
 - GitHub API: `mizchi/github`
 - Async runtime: `moonbitlang/async`
 - Secure token storage: `moonbit-community/proton_safe_storage`
