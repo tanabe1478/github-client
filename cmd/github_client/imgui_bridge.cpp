@@ -115,6 +115,7 @@ extern "C" int github_client_imgui_render(
   ImGui::NewFrame();
 
   int action = 0;
+  bool open_pat_popup = false;
   if (page < 0 || page > 3) {
     page = 0;
   }
@@ -219,7 +220,7 @@ extern "C" int github_client_imgui_render(
     ? "Replace token##auth.sign-in"
     : "Add token##auth.sign-in";
   if (ImGui::Button(credential_button, ImVec2(174.0f, 42.0f))) {
-    ImGui::OpenPopup("Personal access token##auth.pat-dialog");
+    open_pat_popup = true;
     action = 1;
   }
   ImGui::PopStyleColor();
@@ -255,6 +256,9 @@ extern "C" int github_client_imgui_render(
   ImGui::EndChild();
   ImGui::End();
 
+  if (open_pat_popup) {
+    ImGui::OpenPopup("Personal access token##auth.pat-dialog");
+  }
   ImGui::SetNextWindowSize(ImVec2(560.0f, 0.0f), ImGuiCond_Appearing);
   if (ImGui::BeginPopupModal(
         "Personal access token##auth.pat-dialog",
