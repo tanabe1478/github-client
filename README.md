@@ -29,15 +29,9 @@ GLFWを製品window hostとして採用し、OpenGL 3 + Dear ImGuiを接続す�
 
 Kaguraはゲームエンジンなので採用しません。特定作者に寄せず、MoonBitコミュニティ全体のパッケージを比較します。
 
-## Figma design integration
+## Screens
 
-Figma、Claude Code、Codex、PiはFigma公式Remote MCPを共通endpointとして使用します。repository側のcanonical bindingは`design/figma.json`、design tokenは`design/tokens.json`です。
-
-```powershell
-node scripts/design/check-figma-config.cjs
-```
-
-初期設定とsource-of-truthの運用は[`docs/design-workflow.md`](docs/design-workflow.md)、画面一覧は[`docs/screens.md`](docs/screens.md)を参照してください。manifestの`partial`はFigma fileがbound済みで、未同期screenが残っている状態です。
+画面一覧と各画面の責務は[`docs/screens.md`](docs/screens.md)を参照してください。native implementationとscreenshot artifactを検証対象とします。
 
 ## Modules
 
