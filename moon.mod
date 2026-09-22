@@ -9,8 +9,8 @@ import {
   "tanabe1478/github-client-github-api@0.1.0",
   "tanabe1478/github-client-repository-store@0.1.0",
   "mizchi/glfw@0.2.3",
-  "moonbitstack/moonegui@0.2.0",
   "moonbit-community/proton_safe_storage@0.3.3",
+  "moonbitlang/async@0.22.1",
   "moonbit-community/proton_shell@0.3.3",
 }
 

@@ -1,12 +1,30 @@
 ///|
-fn main {
+async fn main {
   println("github-client: starting GLFW + Dear ImGui host")
+  let mut authenticated_login = ""
+  match @credential_store.load_token() {
+    Ok(Some(token)) =>
+      match @github_api.get_authenticated_user(token) {
+        Ok(user) => {
+          authenticated_login = user.login()
+          println("github-authenticated: \{authenticated_login}")
+        }
+        Err(error) => println("github-authentication: \{error}")
+      }
+    Ok(None) => ()
+    Err(error) => println("credential-store: load failed: \{error}")
+  }
   if !@glfw.glfw_init() {
     println("github-client: GLFW initialization failed")
     return
   }
 
-  let window = @glfw.create_opengl_window(1100, 720, "MoonBit GitHub Client")
+  let window_title = if authenticated_login == "" {
+    "MoonBit GitHub Client"
+  } else {
+    "MoonBit GitHub Client - @\{authenticated_login}"
+  }
+  let window = @glfw.create_opengl_window(1100, 720, window_title)
   @glfw.make_context_current(window)
   @glfw.set_swap_interval(true)
   if !imgui_init(window) {
