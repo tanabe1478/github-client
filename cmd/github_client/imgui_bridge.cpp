@@ -20,17 +20,17 @@ static void github_client_apply_material_theme() {
   ImGuiStyle& style = ImGui::GetStyle();
   ImGui::StyleColorsLight();
   style.WindowPadding = ImVec2(20.0f, 20.0f);
-  style.FramePadding = ImVec2(14.0f, 9.0f);
+  style.FramePadding = ImVec2(14.0f, 8.0f);
   style.ItemSpacing = ImVec2(12.0f, 10.0f);
   style.ItemInnerSpacing = ImVec2(8.0f, 6.0f);
-  style.ScrollbarSize = 12.0f;
+  style.ScrollbarSize = 10.0f;
   style.WindowRounding = 0.0f;
-  style.ChildRounding = 6.0f;
-  style.FrameRounding = 6.0f;
-  style.PopupRounding = 6.0f;
+  style.ChildRounding = 16.0f;
+  style.FrameRounding = 8.0f;
+  style.PopupRounding = 14.0f;
   style.ScrollbarRounding = 8.0f;
-  style.GrabRounding = 6.0f;
-  style.TabRounding = 6.0f;
+  style.GrabRounding = 8.0f;
+  style.TabRounding = 8.0f;
   style.WindowBorderSize = 0.0f;
   style.ChildBorderSize = 1.0f;
   style.FrameBorderSize = 0.0f;
@@ -47,9 +47,9 @@ static void github_client_apply_material_theme() {
   colors[ImGuiCol_FrameBg] = ImVec4(0.965f, 0.973f, 0.980f, 1.0f);
   colors[ImGuiCol_FrameBgHovered] = ImVec4(0.918f, 0.933f, 0.949f, 1.0f);
   colors[ImGuiCol_FrameBgActive] = ImVec4(0.867f, 0.957f, 1.0f, 1.0f);
-  colors[ImGuiCol_Button] = ImVec4(0.122f, 0.533f, 0.239f, 1.0f);     // #1f883d
-  colors[ImGuiCol_ButtonHovered] = ImVec4(0.102f, 0.498f, 0.216f, 1.0f);
-  colors[ImGuiCol_ButtonActive] = ImVec4(0.067f, 0.388f, 0.161f, 1.0f);
+  colors[ImGuiCol_Button] = ImVec4(0.965f, 0.973f, 0.980f, 1.0f);     // #f6f8fa
+  colors[ImGuiCol_ButtonHovered] = ImVec4(0.918f, 0.933f, 0.949f, 1.0f);
+  colors[ImGuiCol_ButtonActive] = ImVec4(0.816f, 0.843f, 0.871f, 1.0f);
   colors[ImGuiCol_Header] = ImVec4(0.867f, 0.957f, 1.0f, 1.0f);       // #ddf4ff
   colors[ImGuiCol_HeaderHovered] = ImVec4(0.918f, 0.933f, 0.949f, 1.0f);
   colors[ImGuiCol_HeaderActive] = ImVec4(0.741f, 0.902f, 1.0f, 1.0f);
@@ -225,23 +225,187 @@ static bool github_client_contains_case_insensitive(
   return normalized_value.find(normalized_query) != std::string::npos;
 }
 
+static void github_client_push_primary_button_style() {
+  ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
+  ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(31, 136, 61, 255));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(26, 127, 55, 255));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(17, 99, 41, 255));
+}
+
+static void github_client_draw_folder_icon(
+  ImDrawList* draw,
+  const ImVec2& position,
+  bool selected,
+  bool hovered,
+  float scale = 1.0f
+) {
+  const ImU32 border = IM_COL32(9, 105, 218, selected ? 255 : 150);
+  const ImU32 paper = IM_COL32(255, 255, 255, 255);
+  const ImU32 back = selected
+    ? IM_COL32(84, 174, 255, 255)
+    : hovered ? IM_COL32(191, 219, 255, 255) : IM_COL32(208, 215, 222, 255);
+  const ImU32 front = selected
+    ? IM_COL32(221, 244, 255, 245)
+    : IM_COL32(246, 248, 250, 245);
+  const float lift = selected ? 3.0f * scale : hovered ? 1.5f * scale : 0.0f;
+  draw->AddRectFilled(
+    ImVec2(position.x + 3.0f * scale, position.y + 3.0f * scale),
+    ImVec2(position.x + 20.0f * scale, position.y + 17.0f * scale),
+    back,
+    4.0f * scale
+  );
+  draw->AddRectFilled(
+    ImVec2(position.x + 6.0f * scale, position.y - lift),
+    ImVec2(position.x + 17.0f * scale, position.y + 13.0f * scale - lift),
+    paper,
+    2.5f * scale
+  );
+  draw->AddRect(
+    ImVec2(position.x + 6.0f * scale, position.y - lift),
+    ImVec2(position.x + 17.0f * scale, position.y + 13.0f * scale - lift),
+    IM_COL32(208, 215, 222, 255),
+    2.5f * scale
+  );
+  draw->AddRectFilled(
+    ImVec2(position.x, position.y + 7.0f * scale),
+    ImVec2(position.x + 23.0f * scale, position.y + 20.0f * scale),
+    front,
+    4.0f * scale
+  );
+  draw->AddRect(
+    ImVec2(position.x, position.y + 7.0f * scale),
+    ImVec2(position.x + 23.0f * scale, position.y + 20.0f * scale),
+    border,
+    4.0f * scale,
+    0,
+    1.0f
+  );
+}
+
+static bool github_client_navigation_item(
+  const char* id,
+  const char* label,
+  bool selected,
+  int unread_count = 0
+) {
+  const ImVec2 position = ImGui::GetCursorScreenPos();
+  const ImVec2 size(ImGui::GetContentRegionAvail().x, 44.0f);
+  const bool clicked = ImGui::InvisibleButton(id, size);
+  const bool hovered = ImGui::IsItemHovered();
+  ImDrawList* draw = ImGui::GetWindowDrawList();
+  if (selected || hovered) {
+    draw->AddRectFilled(
+      position,
+      ImVec2(position.x + size.x, position.y + size.y),
+      selected ? IM_COL32(221, 244, 255, 255) : IM_COL32(234, 238, 242, 255),
+      10.0f
+    );
+  }
+  if (selected) {
+    draw->AddRectFilled(
+      ImVec2(position.x, position.y + 9.0f),
+      ImVec2(position.x + 3.0f, position.y + size.y - 9.0f),
+      IM_COL32(9, 105, 218, 255),
+      2.0f
+    );
+  }
+  github_client_draw_folder_icon(
+    draw,
+    ImVec2(position.x + 13.0f, position.y + 11.0f),
+    selected,
+    hovered
+  );
+  draw->AddText(
+    ImVec2(position.x + 48.0f, position.y + 12.0f),
+    selected ? IM_COL32(31, 35, 40, 255) : IM_COL32(89, 99, 110, 255),
+    label
+  );
+  if (unread_count > 0) {
+    const std::string count = std::to_string(unread_count);
+    const ImVec2 text_size = ImGui::CalcTextSize(count.c_str());
+    const float right = position.x + size.x - 10.0f;
+    draw->AddRectFilled(
+      ImVec2(right - text_size.x - 14.0f, position.y + 11.0f),
+      ImVec2(right, position.y + 33.0f),
+      selected ? IM_COL32(9, 105, 218, 255) : IM_COL32(208, 215, 222, 255),
+      11.0f
+    );
+    draw->AddText(
+      ImVec2(right - text_size.x - 7.0f, position.y + 12.0f),
+      selected ? IM_COL32(255, 255, 255, 255) : IM_COL32(89, 99, 110, 255),
+      count.c_str()
+    );
+  }
+  return clicked;
+}
+
+static int github_client_unread_count(const std::vector<GithubClientRow>& rows) {
+  int count = 0;
+  for (const GithubClientRow& row : rows) {
+    if (!row.is_read) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+static void github_client_draw_header_folder(
+  ImDrawList* draw,
+  const ImVec2& position
+) {
+  for (int index = 0; index < 3; ++index) {
+    const float offset = static_cast<float>(index) * 7.0f;
+    draw->AddRectFilled(
+      ImVec2(position.x + 12.0f + offset, position.y - 8.0f - offset),
+      ImVec2(position.x + 55.0f + offset, position.y + 31.0f - offset),
+      IM_COL32(255, 255, 255, 255),
+      8.0f
+    );
+    draw->AddRect(
+      ImVec2(position.x + 12.0f + offset, position.y - 8.0f - offset),
+      ImVec2(position.x + 55.0f + offset, position.y + 31.0f - offset),
+      IM_COL32(208, 215, 222, 255),
+      8.0f
+    );
+  }
+  draw->AddRectFilled(
+    ImVec2(position.x, position.y + 9.0f),
+    ImVec2(position.x + 78.0f, position.y + 51.0f),
+    IM_COL32(221, 244, 255, 245),
+    12.0f
+  );
+  draw->AddRect(
+    ImVec2(position.x, position.y + 9.0f),
+    ImVec2(position.x + 78.0f, position.y + 51.0f),
+    IM_COL32(9, 105, 218, 200),
+    12.0f
+  );
+}
+
 static void github_client_render_activity_rows(
   const std::vector<GithubClientRow>& rows,
   int* action
 ) {
-  int unread_count = 0;
-  for (const GithubClientRow& row : rows) {
-    if (!row.is_read) {
-      ++unread_count;
-    }
-  }
-  ImGui::TextDisabled("Unread: %d of %d", unread_count, static_cast<int>(rows.size()));
+  const int unread_count = github_client_unread_count(rows);
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(246, 248, 250, 255));
+  ImGui::BeginChild(
+    "##activity.toolbar",
+    ImVec2(ImGui::GetContentRegionAvail().x, 52.0f),
+    ImGuiChildFlags_None
+  );
+  ImGui::SetCursorPos(ImVec2(14.0f, 9.0f));
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextDisabled("%d unread", unread_count);
   ImGui::SameLine();
+  ImGui::TextDisabled("· %d total", static_cast<int>(rows.size()));
+  const float filter_width = 128.0f;
+  ImGui::SameLine(ImGui::GetWindowWidth() - filter_width - 12.0f);
   ImGui::Checkbox("Unread only##activity.unread-only", &github_client_unread_only);
-  ImGui::Separator();
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
+  ImGui::Dummy(ImVec2(0.0f, 6.0f));
 
-  const ImGuiTableFlags table_flags =
-    ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_BordersInnerH;
+  const ImGuiTableFlags table_flags = ImGuiTableFlags_SizingStretchProp;
   if (ImGui::BeginTable("##activity.rows", 4, table_flags)) {
     ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 58.0f);
     ImGui::TableSetupColumn("Activity", ImGuiTableColumnFlags_WidthStretch);
@@ -252,7 +416,7 @@ static void github_client_render_activity_rows(
         continue;
       }
       ImGui::PushID(row.url.c_str());
-      ImGui::TableNextRow(0, 42.0f);
+      ImGui::TableNextRow(0, 48.0f);
       ImGui::TableSetColumnIndex(0);
       ImGui::AlignTextToFramePadding();
       if (row.is_read) {
@@ -270,11 +434,13 @@ static void github_client_render_activity_rows(
         ImGui::TextUnformatted(row.label.c_str());
       }
       ImGui::TableSetColumnIndex(2);
+      ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(9, 105, 218, 255));
       if (ImGui::Button("Open##activity.open", ImVec2(76.0f, 32.0f))) {
         github_client_selected_url = row.url;
         github_client_selected_activity_updated_at = row.updated_at;
         *action = 4;
       }
+      ImGui::PopStyleColor();
       ImGui::TableSetColumnIndex(3);
       const char* toggle_label = row.is_read
         ? "Mark unread##activity.toggle"
@@ -360,69 +526,129 @@ extern "C" int github_client_imgui_render(
 
   ImDrawList* draw = ImGui::GetWindowDrawList();
   const ImVec2 origin = ImGui::GetWindowPos();
-  draw->AddRectFilled(
-    origin,
-    ImVec2(origin.x + io.DisplaySize.x, origin.y + 64.0f),
-    IM_COL32(37, 41, 46, 255)
-  );
-  draw->AddCircleFilled(ImVec2(origin.x + 32.0f, origin.y + 32.0f), 17.0f,
-                        IM_COL32(255, 255, 255, 24));
+  const int inbox_unread = github_client_unread_count(pull_requests)
+    + github_client_unread_count(issues);
+  const int personal_unread = github_client_unread_count(personal_activity);
 
-  ImGui::SetCursorPos(ImVec2(22.0f, 20.0f));
-  ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
-  ImGui::TextUnformatted("GH");
-  ImGui::SetCursorPos(ImVec2(60.0f, 20.0f));
-  ImGui::TextUnformatted("MoonBit GitHub Client");
-  ImGui::PopStyleColor();
-
-  ImGui::SetCursorPos(ImVec2(0.0f, 64.0f));
+  ImGui::SetCursorPos(ImVec2(0.0f, 0.0f));
   ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 0.0f);
-  ImGui::BeginChild("##navigation", ImVec2(232.0f, io.DisplaySize.y - 64.0f),
-                    ImGuiChildFlags_Borders);
-  ImGui::PopStyleVar();
-  ImGui::Dummy(ImVec2(0.0f, 8.0f));
-  ImGui::TextDisabled("  NAVIGATION");
-  ImGui::Spacing();
-  if (ImGui::Selectable("  Inbox##nav.inbox", page == 0, 0,
-                        ImVec2(0.0f, 44.0f))) {
-    action = 10;
-  }
-  if (ImGui::Selectable("  For you##nav.for-you", page == 5, 0,
-                        ImVec2(0.0f, 44.0f))) {
-    action = 15;
-  }
-  if (ImGui::Selectable("  Repositories##nav.repositories", page == 1, 0,
-                        ImVec2(0.0f, 44.0f))) {
-    action = 11;
-  }
-  if (ImGui::Selectable("  Pull requests##nav.pull-requests", page == 2, 0,
-                        ImVec2(0.0f, 44.0f))) {
-    action = 12;
-  }
-  if (ImGui::Selectable("  Issues##nav.issues", page == 3, 0,
-                        ImVec2(0.0f, 44.0f))) {
-    action = 13;
-  }
-  ImGui::Spacing();
-  ImGui::Separator();
-  ImGui::Spacing();
-  if (ImGui::Selectable("  Settings##nav.settings", page == 4, 0,
-                        ImVec2(0.0f, 44.0f))) {
-    action = 14;
-  }
-  ImGui::EndChild();
-
-  ImGui::SetCursorPos(ImVec2(264.0f, 92.0f));
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(246, 248, 250, 255));
   ImGui::BeginChild(
-    "##content",
-    ImVec2(io.DisplaySize.x - 296.0f, io.DisplaySize.y - 116.0f),
+    "##navigation",
+    ImVec2(232.0f, io.DisplaySize.y),
     ImGuiChildFlags_None
   );
-  ImGui::TextUnformatted(page_titles[page]);
-  ImGui::TextDisabled("%s", page_descriptions[page]);
-  ImGui::Dummy(ImVec2(0.0f, 10.0f));
+  ImGui::PopStyleColor();
+  ImGui::PopStyleVar();
 
-  const float card_width = ImGui::GetContentRegionAvail().x;
+  ImGui::SetCursorPos(ImVec2(20.0f, 22.0f));
+  const ImVec2 brand_position = ImGui::GetCursorScreenPos();
+  draw = ImGui::GetWindowDrawList();
+  draw->AddRectFilled(
+    brand_position,
+    ImVec2(brand_position.x + 38.0f, brand_position.y + 38.0f),
+    IM_COL32(37, 41, 46, 255),
+    12.0f
+  );
+  draw->AddText(
+    ImVec2(brand_position.x + 8.0f, brand_position.y + 9.0f),
+    IM_COL32(255, 255, 255, 255),
+    "GH"
+  );
+  draw->AddText(
+    ImVec2(brand_position.x + 50.0f, brand_position.y + 1.0f),
+    IM_COL32(31, 35, 40, 255),
+    "GitHub Client"
+  );
+  draw->AddText(
+    ImVec2(brand_position.x + 50.0f, brand_position.y + 22.0f),
+    IM_COL32(89, 99, 110, 255),
+    "MoonBit native"
+  );
+
+  ImGui::SetCursorPos(ImVec2(18.0f, 92.0f));
+  ImGui::TextDisabled("ACTIVITY");
+  ImGui::SetCursorPosX(12.0f);
+  if (github_client_navigation_item(
+        "##nav.inbox", "Inbox", page == 0, inbox_unread
+      )) {
+    action = 10;
+  }
+  ImGui::SetCursorPosX(12.0f);
+  if (github_client_navigation_item(
+        "##nav.for-you", "For you", page == 5, personal_unread
+      )) {
+    action = 15;
+  }
+  ImGui::SetCursorPosX(12.0f);
+  if (github_client_navigation_item(
+        "##nav.pull-requests", "Pull requests", page == 2
+      )) {
+    action = 12;
+  }
+  ImGui::SetCursorPosX(12.0f);
+  if (github_client_navigation_item("##nav.issues", "Issues", page == 3)) {
+    action = 13;
+  }
+
+  ImGui::SetCursorPos(ImVec2(18.0f, 330.0f));
+  ImGui::TextDisabled("MANAGE");
+  ImGui::SetCursorPosX(12.0f);
+  if (github_client_navigation_item(
+        "##nav.repositories", "Repositories", page == 1
+      )) {
+    action = 11;
+  }
+  ImGui::SetCursorPosX(12.0f);
+  if (github_client_navigation_item("##nav.settings", "Settings", page == 4)) {
+    action = 14;
+  }
+
+  ImGui::SetCursorPos(ImVec2(20.0f, io.DisplaySize.y - 50.0f));
+  ImGui::TextDisabled("WINDOWS · NATIVE");
+  ImGui::EndChild();
+
+  const ImVec2 panel_min(origin.x + 244.0f, origin.y + 12.0f);
+  const ImVec2 panel_max(
+    origin.x + io.DisplaySize.x - 12.0f,
+    origin.y + io.DisplaySize.y - 12.0f
+  );
+  draw = ImGui::GetWindowDrawList();
+  draw->AddRectFilled(
+    ImVec2(panel_min.x + 2.0f, panel_min.y + 5.0f),
+    ImVec2(panel_max.x + 2.0f, panel_max.y + 5.0f),
+    IM_COL32(31, 35, 40, 18),
+    22.0f
+  );
+  ImGui::SetCursorPos(ImVec2(244.0f, 12.0f));
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(255, 255, 255, 255));
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 22.0f);
+  ImGui::BeginChild(
+    "##content",
+    ImVec2(io.DisplaySize.x - 256.0f, io.DisplaySize.y - 24.0f),
+    ImGuiChildFlags_Borders
+  );
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
+
+  ImGui::SetCursorPos(ImVec2(28.0f, 24.0f));
+  ImGui::TextDisabled(page == 4 || page == 1 ? "MANAGE" : "ACTIVITY");
+  ImGui::SetCursorPosX(28.0f);
+  ImGui::SetWindowFontScale(1.25f);
+  ImGui::TextUnformatted(page_titles[page]);
+  ImGui::SetWindowFontScale(1.0f);
+  ImGui::SetCursorPosX(28.0f);
+  ImGui::TextDisabled("%s", page_descriptions[page]);
+  github_client_draw_header_folder(
+    ImGui::GetWindowDrawList(),
+    ImVec2(
+      ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 112.0f,
+      ImGui::GetWindowPos().y + 36.0f
+    )
+  );
+  ImGui::SetCursorPos(ImVec2(28.0f, 116.0f));
+
+  const float card_width = ImGui::GetContentRegionAvail().x - 8.0f;
   if (page == 4) {
     ImGui::BeginChild("##credential.card", ImVec2(card_width, 210.0f),
                       ImGuiChildFlags_Borders);
@@ -436,7 +662,7 @@ extern "C" int github_client_imgui_render(
         : "Add a fine-grained personal access token. It is encrypted before being written to disk."
     );
     ImGui::Dummy(ImVec2(0.0f, 12.0f));
-    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
+    github_client_push_primary_button_style();
     const char* credential_button = has_saved_token
       ? "Replace token##auth.sign-in"
       : "Add token##auth.sign-in";
@@ -444,7 +670,7 @@ extern "C" int github_client_imgui_render(
       open_pat_popup = true;
       action = 1;
     }
-    ImGui::PopStyleColor();
+    ImGui::PopStyleColor(4);
     ImGui::SameLine();
     ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("Interaction count: %d", sign_in_requests);
@@ -466,11 +692,11 @@ extern "C" int github_client_imgui_render(
         sizeof(github_client_repository_input)
       );
       ImGui::SameLine();
-      ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
+      github_client_push_primary_button_style();
       if (ImGui::Button("Watch##repository.register", ImVec2(150.0f, 0.0f))) {
         action = 2;
       }
-      ImGui::PopStyleColor();
+      ImGui::PopStyleColor(4);
       ImGui::TextDisabled("Watched: %d", repository_count);
       if (!sync_status.empty()) {
         ImGui::SameLine();
@@ -529,7 +755,7 @@ extern "C" int github_client_imgui_render(
           ImGui::Button(watched_id.c_str(), ImVec2(100.0f, 34.0f));
           ImGui::EndDisabled();
         } else {
-          ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
+          github_client_push_primary_button_style();
           const std::string watch_id = "Watch##suggestion." + suggestion.url;
           if (ImGui::Button(watch_id.c_str(), ImVec2(100.0f, 34.0f))) {
             std::snprintf(
@@ -540,7 +766,7 @@ extern "C" int github_client_imgui_render(
             );
             action = 2;
           }
-          ImGui::PopStyleColor();
+          ImGui::PopStyleColor(4);
         }
         ImGui::Separator();
       }
@@ -589,12 +815,12 @@ extern "C" int github_client_imgui_render(
       ImGuiInputTextFlags_Password
     );
     ImGui::Spacing();
-    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
+    github_client_push_primary_button_style();
     if (ImGui::Button("Save securely##auth.pat-save", ImVec2(160.0f, 40.0f))) {
       action = 3;
       ImGui::CloseCurrentPopup();
     }
-    ImGui::PopStyleColor();
+    ImGui::PopStyleColor(4);
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(246, 248, 250, 255));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(234, 238, 242, 255));

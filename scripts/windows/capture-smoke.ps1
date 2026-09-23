@@ -88,12 +88,12 @@ try {
     throw "Could not read the application window bounds."
   }
   $NavigationY = @{
-    Inbox = 174
-    ForYou = 228
-    Repositories = 282
-    PullRequests = 336
-    Issues = 390
-    Settings = 475
+    Inbox = 165
+    ForYou = 219
+    PullRequests = 273
+    Issues = 327
+    Repositories = 404
+    Settings = 458
   }
   if ($Page -ne "Inbox") {
     $null = [GithubClientCapture]::SetCursorPos(

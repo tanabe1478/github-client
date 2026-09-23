@@ -104,7 +104,7 @@ try {
   }
   Save-WindowScreenshot $WindowHandle $Rect (Join-Path $ArtifactPath "before.png")
 
-  $null = [GithubClientInteraction]::SetCursorPos($Rect.Left + 96, $Rect.Top + 475)
+  $null = [GithubClientInteraction]::SetCursorPos($Rect.Left + 96, $Rect.Top + 458)
   [GithubClientInteraction]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
   [GithubClientInteraction]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Seconds 2
