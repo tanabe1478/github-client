@@ -2,8 +2,8 @@
 test "routes cover only the product API surface" {
   inspect(authenticated_user_path(), content="/user")
   inspect(
-    owned_repositories_path(2),
-    content="/user/repos?affiliation=owner&visibility=all&sort=updated&direction=desc&per_page=100&page=2",
+    accessible_repositories_path(2),
+    content="/user/repos?affiliation=owner,collaborator,organization_member&visibility=all&sort=updated&direction=desc&per_page=100&page=2",
   )
   inspect(
     personal_issues_path("mentioned", 2),

@@ -61,7 +61,7 @@ function nativeConfig() {
       cc: "clang",
       cxx: "clang++",
       cflags: prefix ? `-I${slash(path.join(prefix, "include"))}` : "",
-      libs: `${prefix ? `-L${slash(path.join(prefix, "lib"))}` : ""} -lglfw -framework OpenGL -framework Cocoa -framework IOKit -framework CoreFoundation -framework QuartzCore`,
+      libs: `${prefix ? `-L${slash(path.join(prefix, "lib"))}` : ""} -lglfw -lc++ -framework OpenGL -framework Cocoa -framework IOKit -framework CoreFoundation -framework QuartzCore`,
     };
   }
 

@@ -14,3 +14,5 @@
 .env
 .env.*
 !.env.example
+/pkg.generated.mbti
+pkg.generated.mbti

@@ -6,5 +6,6 @@ members = [
   "modules/github_api",
   "modules/repository_store",
   "modules/read_state_store",
+  "modules/triage_store",
   "vendor/glfw-mbt",
 ]

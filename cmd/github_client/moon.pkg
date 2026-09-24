@@ -1,12 +1,16 @@
 import {
   "mizchi/glfw",
   "moonbitlang/async",
+  "moonbitlang/async/shell" @async_shell,
+  "moonbitlang/x/fs",
   "moonbit-community/proton_shell" @shell,
+  "tanabe1478/github-client-app-paths" @app_paths,
   "tanabe1478/github-client-credential-store" @credential_store,
   "tanabe1478/github-client-domain" @domain,
   "tanabe1478/github-client-github-api" @github_api,
   "tanabe1478/github-client-repository-store" @repository_store,
   "tanabe1478/github-client-read-state-store" @read_state_store,
+  "tanabe1478/github-client-triage-store" @triage_store,
 }
 
 pkgtype(kind: "executable")

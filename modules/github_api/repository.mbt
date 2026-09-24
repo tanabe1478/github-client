@@ -49,12 +49,12 @@ pub fn decode_repositories(
 }
 
 ///|
-pub async fn list_owned_repositories(
+pub async fn list_accessible_repositories(
   token : String,
 ) -> Result[Array[RepositorySummary], String] {
   let result : Array[RepositorySummary] = []
   for page = 1; page <= 10; page = page + 1 {
-    guard get_json(token, owned_repositories_path(page)) is Ok(json) else {
+    guard get_json(token, accessible_repositories_path(page)) is Ok(json) else {
       return Err("GitHub repository suggestions could not be loaded")
     }
     guard decode_repositories(json) is Ok(repositories) else {

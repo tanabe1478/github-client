@@ -1,4 +1,20 @@
 ///|
+test "scope normalization defaults blanks and rejects unsafe names" {
+  guard normalize_scope("   ") is Ok(scope) else {
+    fail("blank scope must fall back to default")
+  }
+  inspect(scope, content="default")
+  guard normalize_scope("My-Org") is Ok(lowered) else {
+    fail("owner names must be accepted")
+  }
+  inspect(lowered, content="my-org")
+  guard normalize_scope("bad_scope!") is Err(error) else {
+    fail("unsafe scope must be rejected")
+  }
+  inspect(error, content="scope may only contain letters, digits, and hyphens")
+}
+
+///|
 test "empty tokens are rejected before storage" {
   guard save_token("   ") is Err(error) else {
     fail("empty token must be rejected")

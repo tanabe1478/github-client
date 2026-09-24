@@ -9,6 +9,14 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#define GITHUB_CLIENT_TOKEN_NOTE "The token stays masked and is encrypted with Windows DPAPI before storage."
+#elif defined(__APPLE__)
+#define GITHUB_CLIENT_TOKEN_NOTE "The token stays masked and is encrypted with the macOS Keychain before storage."
+#else
+#define GITHUB_CLIENT_TOKEN_NOTE "The token stays masked and is encrypted by the OS credential store before storage."
+#endif
+
 #include "../../vendor/imgui/imgui.cpp"
 #include "../../vendor/imgui/imgui_draw.cpp"
 #include "../../vendor/imgui/imgui_tables.cpp"
@@ -82,6 +90,24 @@ static void github_client_load_fonts() {
     );
   }
 #endif
+#ifdef __APPLE__
+  ImFont* base = io.Fonts->AddFontFromFileTTF(
+    "/System/Library/Fonts/SFNS.ttf",
+    18.0f
+  );
+  if (base != nullptr) {
+    io.FontDefault = base;
+    ImFontConfig japanese_config;
+    japanese_config.MergeMode = true;
+    japanese_config.PixelSnapH = true;
+    io.Fonts->AddFontFromFileTTF(
+      "/System/Library/Fonts/Hiragino Sans GB.ttc",
+      18.0f,
+      &japanese_config,
+      io.Fonts->GetGlyphRangesJapanese()
+    );
+  }
+#endif
 }
 
 extern "C" int github_client_imgui_init(GLFWwindow* window) {
@@ -111,17 +137,21 @@ extern "C" int github_client_imgui_init(GLFWwindow* window) {
 }
 
 static char github_client_repository_input[256] = "";
+static char github_client_scope_input[128] = "";
 static char github_client_token_input[512] = "";
 static std::string github_client_selected_url;
 static std::string github_client_selected_activity_updated_at;
 static std::string github_client_selected_repository;
-static bool github_client_unread_only = false;
+static std::string github_client_selected_credential;
+static bool github_client_show_done = false;
+static bool github_client_auto_refresh_enabled = true;
 
 struct GithubClientRow {
   std::string label;
   std::string url;
   bool is_read;
   std::string updated_at;
+  bool is_saved;
 };
 
 static std::string github_client_utf16_to_utf8(const uint16_t* source) {
@@ -192,11 +222,17 @@ static std::vector<GithubClientRow> github_client_parse_rows(
             second + 1,
             third == std::string::npos ? std::string::npos : third - second - 1
           );
+      const size_t fourth = third == std::string::npos
+        ? std::string::npos
+        : line.find('\t', third + 1);
       rows.push_back({
         line.substr(0, first),
         url,
         state == "read",
-        third == std::string::npos ? "" : line.substr(third + 1)
+        fourth == std::string::npos
+          ? (third == std::string::npos ? "" : line.substr(third + 1))
+          : line.substr(third + 1, fourth - third - 1),
+        fourth != std::string::npos && line.substr(fourth + 1) == "saved"
       });
     }
     if (end == std::string::npos) {
@@ -400,19 +436,21 @@ static void github_client_render_activity_rows(
   ImGui::TextDisabled("· %d total", static_cast<int>(rows.size()));
   const float filter_width = 128.0f;
   ImGui::SameLine(ImGui::GetWindowWidth() - filter_width - 12.0f);
-  ImGui::Checkbox("Unread only##activity.unread-only", &github_client_unread_only);
+  ImGui::Checkbox("Show done##activity.show-done", &github_client_show_done);
   ImGui::EndChild();
   ImGui::PopStyleColor();
   ImGui::Dummy(ImVec2(0.0f, 6.0f));
 
   const ImGuiTableFlags table_flags = ImGuiTableFlags_SizingStretchProp;
-  if (ImGui::BeginTable("##activity.rows", 4, table_flags)) {
-    ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 58.0f);
+  if (ImGui::BeginTable("##activity.rows", 6, table_flags)) {
+    ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 52.0f);
     ImGui::TableSetupColumn("Activity", ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableSetupColumn("Open", ImGuiTableColumnFlags_WidthFixed, 82.0f);
-    ImGui::TableSetupColumn("Read action", ImGuiTableColumnFlags_WidthFixed, 128.0f);
+    ImGui::TableSetupColumn("Done", ImGuiTableColumnFlags_WidthFixed, 126.0f);
+    ImGui::TableSetupColumn("Save", ImGuiTableColumnFlags_WidthFixed, 78.0f);
+    ImGui::TableSetupColumn("Unsubscribe", ImGuiTableColumnFlags_WidthFixed, 114.0f);
     for (const GithubClientRow& row : rows) {
-      if (github_client_unread_only && row.is_read) {
+      if (!github_client_show_done && row.is_read) {
         continue;
       }
       ImGui::PushID(row.url.c_str());
@@ -420,19 +458,24 @@ static void github_client_render_activity_rows(
       ImGui::TableSetColumnIndex(0);
       ImGui::AlignTextToFramePadding();
       if (row.is_read) {
-        ImGui::TextDisabled("Read");
+        ImGui::TextDisabled("Done");
       } else {
         ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(9, 105, 218, 255));
         ImGui::TextUnformatted("Unread");
         ImGui::PopStyleColor();
       }
+      if (row.is_saved) {
+        ImGui::TextDisabled("Saved");
+      }
       ImGui::TableSetColumnIndex(1);
       ImGui::AlignTextToFramePadding();
+      ImGui::PushTextWrapPos(0.0f);
       if (row.is_read) {
         ImGui::TextDisabled("%s", row.label.c_str());
       } else {
         ImGui::TextUnformatted(row.label.c_str());
       }
+      ImGui::PopTextWrapPos();
       ImGui::TableSetColumnIndex(2);
       ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(9, 105, 218, 255));
       if (ImGui::Button("Open##activity.open", ImVec2(76.0f, 32.0f))) {
@@ -442,14 +485,34 @@ static void github_client_render_activity_rows(
       }
       ImGui::PopStyleColor();
       ImGui::TableSetColumnIndex(3);
-      const char* toggle_label = row.is_read
-        ? "Mark unread##activity.toggle"
-        : "Mark read##activity.toggle";
-      if (ImGui::Button(toggle_label, ImVec2(122.0f, 32.0f))) {
+      const char* done_label = row.is_read
+        ? "Move to inbox##activity.done"
+        : "Done##activity.done";
+      if (ImGui::Button(done_label, ImVec2(118.0f, 32.0f))) {
         github_client_selected_url = row.url;
         github_client_selected_activity_updated_at = row.updated_at;
         *action = 6;
       }
+      ImGui::TableSetColumnIndex(4);
+      const char* save_label = row.is_saved
+        ? "Saved##activity.save"
+        : "Save##activity.save";
+      if (ImGui::Button(save_label, ImVec2(72.0f, 32.0f))) {
+        github_client_selected_url = row.url;
+        github_client_selected_activity_updated_at = row.updated_at;
+        *action = 22;
+      }
+      ImGui::TableSetColumnIndex(5);
+      ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(207, 34, 46, 255));
+      ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(246, 248, 250, 255));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(255, 235, 233, 255));
+      ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(255, 206, 203, 255));
+      if (ImGui::Button("Unsubscribe##activity.unsubscribe", ImVec2(108.0f, 32.0f))) {
+        github_client_selected_url = row.url;
+        github_client_selected_activity_updated_at = row.updated_at;
+        *action = 23;
+      }
+      ImGui::PopStyleColor(4);
       ImGui::PopID();
     }
     ImGui::EndTable();
@@ -461,12 +524,14 @@ extern "C" int github_client_imgui_render(
   int page,
   int sign_in_requests,
   int repository_count,
-  int has_saved_token,
+  int credential_count,
   uint16_t* repositories_text,
   uint16_t* suggested_repositories_text,
   uint16_t* pull_requests_text,
   uint16_t* issues_text,
   uint16_t* personal_activity_text,
+  uint16_t* saved_activity_text,
+  uint16_t* credentials_text,
   uint16_t* sync_status_text
 ) {
   ImGui_ImplOpenGL3_NewFrame();
@@ -485,12 +550,17 @@ extern "C" int github_client_imgui_render(
     github_client_parse_rows(issues_text);
   const std::vector<GithubClientRow> personal_activity =
     github_client_parse_rows(personal_activity_text);
+  const std::vector<GithubClientRow> saved_activity =
+    github_client_parse_rows(saved_activity_text);
+  const std::vector<GithubClientRow> credentials =
+    github_client_parse_rows(credentials_text);
   const std::string sync_status = github_client_utf16_to_utf8(sync_status_text);
-  if (page < 0 || page > 5) {
+  if (page < 0 || page > 6) {
     page = 0;
   }
   const char* page_titles[] = {
-    "Inbox", "Repositories", "Pull requests", "Issues", "Settings", "For you"
+    "Inbox", "Repositories", "Pull requests", "Issues", "Settings",
+    "For you", "Saved"
   };
   const char* page_descriptions[] = {
     "Activity from Watched repositories and their dependencies.",
@@ -498,11 +568,12 @@ extern "C" int github_client_imgui_render(
     "Review relevant pull requests across monitored repositories.",
     "Track issues from Watched repositories in one place.",
     "Manage authentication and application preferences.",
-    "Personal activity from Watched repositories only."
+    "Personal activity from Watched repositories only.",
+    "Items you saved for later."
   };
   const char* recent_titles[] = {
     "Watched activity", "Watched repositories", "Relevant pull requests",
-    "Relevant issues", "Credential", "Items involving you"
+    "Relevant issues", "Credential", "Items involving you", "Saved items"
   };
   const char* empty_messages[] = {
     "No Watched repository activity needs your attention.",
@@ -510,7 +581,8 @@ extern "C" int github_client_imgui_render(
     "No relevant pull requests found.",
     "No relevant issues found.",
     "No credential is configured.",
-    "No personal activity was found in Watched repositories."
+    "No personal activity was found in Watched repositories.",
+    "No saved items yet. Use Save on any activity row."
   };
   ImGuiIO& io = ImGui::GetIO();
   ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
@@ -581,6 +653,10 @@ extern "C" int github_client_imgui_render(
     action = 15;
   }
   ImGui::SetCursorPosX(12.0f);
+  if (github_client_navigation_item("##nav.saved", "Saved", page == 6)) {
+    action = 16;
+  }
+  ImGui::SetCursorPosX(12.0f);
   if (github_client_navigation_item(
         "##nav.pull-requests", "Pull requests", page == 2
       )) {
@@ -591,7 +667,7 @@ extern "C" int github_client_imgui_render(
     action = 13;
   }
 
-  ImGui::SetCursorPos(ImVec2(18.0f, 330.0f));
+  ImGui::SetCursorPos(ImVec2(18.0f, 384.0f));
   ImGui::TextDisabled("MANAGE");
   ImGui::SetCursorPosX(12.0f);
   if (github_client_navigation_item(
@@ -604,8 +680,6 @@ extern "C" int github_client_imgui_render(
     action = 14;
   }
 
-  ImGui::SetCursorPos(ImVec2(20.0f, io.DisplaySize.y - 50.0f));
-  ImGui::TextDisabled("WINDOWS · NATIVE");
   ImGui::EndChild();
 
   const ImVec2 panel_min(origin.x + 244.0f, origin.y + 12.0f);
@@ -650,23 +724,22 @@ extern "C" int github_client_imgui_render(
 
   const float card_width = ImGui::GetContentRegionAvail().x - 8.0f;
   if (page == 4) {
-    ImGui::BeginChild("##credential.card", ImVec2(card_width, 210.0f),
+    const float card_height =
+      340.0f + static_cast<float>(credentials.size()) * 46.0f;
+    ImGui::BeginChild("##credential.card", ImVec2(card_width, card_height),
                       ImGuiChildFlags_Borders);
     ImGui::TextUnformatted(
-      has_saved_token ? "GitHub credential is protected" : "Connect your GitHub account"
+      credential_count > 0 ? "GitHub credentials are protected" : "Connect your GitHub account"
     );
     ImGui::Spacing();
     ImGui::TextWrapped(
-      has_saved_token
-        ? "A personal access token is encrypted with the operating system credential store."
+      credential_count > 0
+        ? "Saved tokens are encrypted with the operating system credential store."
         : "Add a fine-grained personal access token. It is encrypted before being written to disk."
     );
     ImGui::Dummy(ImVec2(0.0f, 12.0f));
     github_client_push_primary_button_style();
-    const char* credential_button = has_saved_token
-      ? "Replace token##auth.sign-in"
-      : "Add token##auth.sign-in";
-    if (ImGui::Button(credential_button, ImVec2(174.0f, 42.0f))) {
+    if (ImGui::Button("Add token##auth.sign-in", ImVec2(174.0f, 42.0f))) {
       open_pat_popup = true;
       action = 1;
     }
@@ -675,13 +748,65 @@ extern "C" int github_client_imgui_render(
     ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("Interaction count: %d", sign_in_requests);
     if (!sync_status.empty()) {
+      ImGui::SameLine();
       ImGui::TextDisabled("%s", sync_status.c_str());
     }
+    if (!credentials.empty()) {
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::Spacing();
+      for (const GithubClientRow& credential : credentials) {
+        const float right_edge =
+          ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(credential.label.c_str());
+        if (!credential.url.empty()) {
+          ImGui::SameLine();
+          ImGui::TextDisabled("@%s", credential.url.c_str());
+        }
+        ImGui::SameLine(right_edge - 100.0f);
+        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(207, 34, 46, 255));
+        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(246, 248, 250, 255));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(255, 235, 233, 255));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(255, 206, 203, 255));
+        const std::string remove_id =
+          "Remove##credential.remove." + credential.label;
+        if (ImGui::Button(remove_id.c_str(), ImVec2(100.0f, 34.0f))) {
+          github_client_selected_credential = credential.label;
+          action = 7;
+        }
+        ImGui::PopStyleColor(4);
+        ImGui::Separator();
+      }
+    }
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    ImGui::Checkbox(
+      "Auto refresh every 5 minutes##settings.auto-refresh",
+      &github_client_auto_refresh_enabled
+    );
+    ImGui::TextWrapped(
+      "When enabled, watched and personal activity is refetched periodically and new items post a macOS notification."
+    );
     ImGui::EndChild();
   } else {
     ImGui::BeginChild("##activity.card", ImGui::GetContentRegionAvail(),
                       ImGuiChildFlags_Borders);
     ImGui::TextUnformatted(recent_titles[page]);
+    if (page == 0 || page == 2 || page == 3 || page == 5 || page == 6) {
+      const float refresh_right =
+        ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+      ImGui::SameLine(refresh_right - 104.0f);
+      ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(246, 248, 250, 255));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(234, 238, 242, 255));
+      ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(208, 215, 222, 255));
+      ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(36, 41, 47, 255));
+      if (ImGui::Button("Refresh##activity.refresh", ImVec2(104.0f, 30.0f))) {
+        action = (page == 5) ? 21 : 20;
+      }
+      ImGui::PopStyleColor(4);
+    }
     ImGui::Separator();
     if (page == 1) {
       ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 190.0f);
@@ -781,6 +906,8 @@ extern "C" int github_client_imgui_render(
         visible_rows = issues;
       } else if (page == 5) {
         visible_rows = personal_activity;
+      } else if (page == 6) {
+        visible_rows = saved_activity;
       }
       if (visible_rows.empty()) {
         ImGui::TextDisabled("%s", empty_messages[page]);
@@ -802,8 +929,14 @@ extern "C" int github_client_imgui_render(
         nullptr,
         ImGuiWindowFlags_AlwaysAutoResize
       )) {
-    ImGui::TextWrapped(
-      "The token stays masked and is encrypted with Windows DPAPI before storage."
+    ImGui::TextWrapped(GITHUB_CLIENT_TOKEN_NOTE);
+    ImGui::Spacing();
+    ImGui::SetNextItemWidth(520.0f);
+    ImGui::InputTextWithHint(
+      "##auth.scope-input",
+      "owner or organization (blank = personal default)",
+      github_client_scope_input,
+      sizeof(github_client_scope_input)
     );
     ImGui::Spacing();
     ImGui::SetNextItemWidth(520.0f);
@@ -826,6 +959,7 @@ extern "C" int github_client_imgui_render(
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(234, 238, 242, 255));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(208, 215, 222, 255));
     if (ImGui::Button("Cancel##auth.pat-cancel", ImVec2(110.0f, 40.0f))) {
+      github_client_scope_input[0] = '\0';
       github_client_token_input[0] = '\0';
       ImGui::CloseCurrentPopup();
     }
@@ -853,6 +987,30 @@ extern "C" moonbit_string_t github_client_imgui_take_repository(void) {
     );
   }
   github_client_repository_input[0] = '\0';
+  return result;
+}
+
+extern "C" moonbit_string_t github_client_imgui_take_credential_scope(void) {
+  const size_t length = std::strlen(github_client_scope_input);
+  moonbit_string_t result = moonbit_make_string(length, 0);
+  for (size_t index = 0; index < length; ++index) {
+    result[index] = static_cast<uint16_t>(
+      static_cast<unsigned char>(github_client_scope_input[index])
+    );
+  }
+  github_client_scope_input[0] = '\0';
+  return result;
+}
+
+extern "C" moonbit_string_t github_client_imgui_take_selected_credential(void) {
+  const size_t length = github_client_selected_credential.size();
+  moonbit_string_t result = moonbit_make_string(length, 0);
+  for (size_t index = 0; index < length; ++index) {
+    result[index] = static_cast<uint16_t>(
+      static_cast<unsigned char>(github_client_selected_credential[index])
+    );
+  }
+  github_client_selected_credential.clear();
   return result;
 }
 
@@ -908,4 +1066,39 @@ extern "C" void github_client_imgui_shutdown(void) {
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplGlfw_Shutdown();
   ImGui::DestroyContext();
+}
+
+extern "C" double github_client_imgui_now(void) {
+  return ImGui::GetTime();
+}
+
+extern "C" int github_client_imgui_auto_refresh_enabled(void) {
+  return github_client_auto_refresh_enabled ? 1 : 0;
+}
+
+// Scripted-input support: stages values so the take_* accessors return them as
+// if a UI control had produced them. Used by the control-file command channel
+// to drive the app without synthetic OS input.
+extern "C" void github_client_imgui_stage(
+  const uint16_t* url,
+  const uint16_t* updated_at,
+  const uint16_t* repository
+) {
+  github_client_selected_url = github_client_utf16_to_utf8(url);
+  github_client_selected_activity_updated_at =
+    github_client_utf16_to_utf8(updated_at);
+  const std::string repository_text = github_client_utf16_to_utf8(repository);
+  if (!repository_text.empty()) {
+    std::strncpy(
+      github_client_repository_input,
+      repository_text.c_str(),
+      sizeof(github_client_repository_input) - 1
+    );
+    github_client_repository_input[sizeof(github_client_repository_input) - 1] =
+      '\0';
+  }
+}
+
+extern "C" void github_client_imgui_set_show_done(int value) {
+  github_client_show_done = value != 0;
 }

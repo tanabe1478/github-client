@@ -38,7 +38,7 @@ Kaguraはゲームエンジンなので採用しません。特定作者に寄�
 - `modules/domain`: Pureなproduct modelとrelevance rule
 - `modules/github_api`: 最小GitHub API surface
 - `modules/app_paths`: OS別application data path
-- `modules/credential_store`: DPAPI/KeychainによるPAT暗号化保存
+- `modules/credential_store`: DPAPI/KeychainによるPAT暗号化保存（`default`とowner/organization scopeの複数トークンに対応）
 - `modules/repository_store`: 登録repositoryのfilesystem persistence
 - `modules/read_state_store`: activityの未読・既読状態のfilesystem persistence
 - `cmd/github_client`: desktop composition root
@@ -66,3 +66,50 @@ $env:VCPKG_ROOT = "$HOME\vcpkg"
 ```
 
 `interaction-smoke.ps1`は実際のWindows windowを起動し、Settings navigationと操作後のscreenshotを検証します。
+
+## macOS bootstrap
+
+前提条件はXcode Command Line Tools、Homebrew版GLFW、miseです。MoonBit toolchainは`mise.toml`にpinしてあり、`mise install`がtoolchainとcoreを展開します。
+
+```sh
+xcode-select --install
+brew install glfw
+git submodule update --init
+./scripts/macos/run.sh
+```
+
+ビルドのみの場合は`./scripts/macos/run.sh --build-only`を使用します。既読状態は`~/.config/moonbit-github-client/read-state.txt`へ保存されます。
+
+```sh
+./scripts/macos/run.sh --build-only
+./scripts/macos/capture-smoke.sh --page Settings --output artifacts/macos/settings.png
+```
+
+`capture-smoke.sh`はcontrol file経由でnavigationを実行し、`screencapture -l`で撮影します。windowを前面に出さず、focusもcursorも動かさないため、作業中のappを邪魔せずに検証できます。権限はscreen recordingのみ必要です。
+
+### Control file
+
+起動中のappは`~/.config/moonbit-github-client/control.txt`を約0.5秒ごとに監視し、書き込まれたコマンドをUI操作と同じhandlerで実行します。fileは読み込み後に削除されます。`scripts/macos/ctl.sh`が送信interfaceです。
+
+```sh
+./scripts/macos/ctl.sh nav for-you
+./scripts/macos/ctl.sh save https://github.com/owner/repo/pull/123
+./scripts/macos/ctl.sh done https://github.com/owner/repo/issues/123
+./scripts/macos/ctl.sh unsub https://github.com/owner/repo/pull/123
+./scripts/macos/ctl.sh open https://github.com/owner/repo/pull/123
+./scripts/macos/ctl.sh refresh
+./scripts/macos/ctl.sh quit
+```
+
+利用可能なcommandは`./scripts/macos/ctl.sh`を引数なしで実行すると表示されます。`capture-smoke.sh --cmd 'save <url>'`で任意のcommandを撮影前に送信できます。ImGuiのcontrolはOSのaccessibility treeに露出しないため、この仕組みがUIの決定的な自動操作経路になります。
+
+## macOS app bundle
+
+`./scripts/macos/package-app.sh`がrelease buildを作成し、`MoonBit GitHub Client.app`として`/Applications`へinstallします。bundleはlibglfwを同梱し、署名はad-hocです。install先を変える場合は`INSTALL_DIR`を指定してください。
+
+```sh
+./scripts/macos/package-app.sh
+INSTALL_DIR=~/Applications ./scripts/macos/package-app.sh
+```
+
+ad-hoc署名なのでこのmachineではそのまま起動できますが、他のmachineではGatekeeperにblockされます。配布する場合はDeveloper ID署名が必要です。

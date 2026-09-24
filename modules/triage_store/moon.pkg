@@ -1,0 +1,6 @@
+import {
+  "moonbitlang/x/fs",
+  "tanabe1478/github-client-app-paths" @app_paths,
+}
+
+supported_targets = "native"
