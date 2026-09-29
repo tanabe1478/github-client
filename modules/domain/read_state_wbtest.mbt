@@ -29,3 +29,32 @@ test "watched repository matching is case insensitive" {
   assert_true(repository_is_watched(repositories, "acme/desktop"))
   assert_false(repository_is_watched(repositories, "external/project"))
 }
+
+///|
+test "prune_markers keeps only listed URLs" {
+  let markers = [
+    ReadMarker::new("https://github.com/o/a/pull/1", "2026-01-01T00:00:00Z"),
+    ReadMarker::new("https://github.com/o/a/pull/2", "2026-01-01T00:00:00Z"),
+  ]
+  let kept = prune_markers(
+    markers,
+    Map([("https://github.com/o/a/pull/2", true)]),
+  )
+  assert_eq(kept.map(marker => marker.url()), ["https://github.com/o/a/pull/2"])
+}
+
+///|
+test "read_index looks markers up by URL" {
+  let index = read_index([
+    ReadMarker::new("https://github.com/o/a/pull/1", "2026-02-01T00:00:00Z"),
+  ])
+  assert_true(
+    is_read_in(index, "https://github.com/o/a/pull/1", "2026-01-01T00:00:00Z"),
+  )
+  assert_false(
+    is_read_in(index, "https://github.com/o/a/pull/1", "2026-03-01T00:00:00Z"),
+  )
+  assert_false(
+    is_read_in(index, "https://github.com/o/a/pull/9", "2026-01-01T00:00:00Z"),
+  )
+}

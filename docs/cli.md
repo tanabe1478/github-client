@@ -19,7 +19,7 @@ Install it on macOS with `scripts/macos/install-cli.sh` (default destination `~/
 | `watch <owner/name>...` / `unwatch <owner/name>...` | Change watched repositories |
 | `accounts` | Saved token scopes and their logins; never the tokens |
 
-Activity commands fetch from GitHub on every call and hide done items unless `--all` is given. `--query` matches the title, `#number`, or `@author`, as the app's filter does. Reasons are `Review requested`, `Assigned`, `Mentioned`, and `Subscribed`. Item URLs are `https://github.com/OWNER/NAME/pull/N` or `.../issues/N`.
+Activity commands fetch from GitHub on every call and hide done items unless `--all` is given. `--query` matches the title, `#number`, or `@author`, as the app's filter does. Reasons are `Review requested`, `Assigned`, `Mentioned`, and `Subscribed`. A review request GitHub removed after a teammate reviewed for the team stays until you review or the pull request closes; it carries both `Review requested` and `Still needs your review`. `for-you` shares that list with the app (`review-requests.txt`). Item URLs are `https://github.com/OWNER/NAME/pull/N` or `.../issues/N`.
 
 `done` fetches the item first, so a later update on GitHub makes it unread again, as in the app. The other triage commands only change local files.
 
@@ -46,11 +46,12 @@ Activity commands:
       "reasons": []
     }
   ],
-  "errors": [{ "source": "owner/name or token:SCOPE", "message": "..." }]
+  "errors": [{ "source": "owner/name or token:SCOPE", "message": "..." }],
+  "warnings": ["acme/storefront issues hit the page limit; only the newest items are included"]
 }
 ```
 
-Items are sorted newest first. `kind` is `pull_request` or `issue`; `reasons` is filled for `for-you`. `draft` is always `false` for items fetched one by one (`saved`), because that endpoint does not report it.
+Items are sorted newest first. Lists are read to their last page (up to 2,000 open pull requests and 2,000 open issues per repository, 1,000 per For you source); a list that reaches its limit is named in `warnings`. `kind` is `pull_request` or `issue`; `reasons` is filled for `for-you`. `draft` is always `false` for items fetched one by one (`saved`), because that endpoint does not report it.
 
 Commands that change state:
 

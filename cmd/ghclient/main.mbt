@@ -12,6 +12,7 @@ priv struct Session {
   owner_scopes : Map[String, String]
   mut scopes_loaded : Bool
   errors : Array[FetchError]
+  incomplete : Map[String, Bool]
 }
 
 ///|
@@ -101,6 +102,7 @@ fn load_session() -> (Session, Array[FetchError]) {
       owner_scopes: Map([]),
       scopes_loaded: false,
       errors: problems.copy(),
+      incomplete: Map([]),
     },
     problems,
   )
@@ -150,6 +152,7 @@ async fn Session::fetch_watched(
     issues,
     failures,
     () => (),
+    incomplete=self.incomplete,
   )
   let retry = repositories.filter(repository => {
     failures.get(repository.key()).map(retryable).unwrap_or(false)
@@ -168,6 +171,7 @@ async fn Session::fetch_watched(
       issues,
       failures,
       () => (),
+      incomplete=self.incomplete,
     )
   }
   for repository, message in failures {
@@ -192,6 +196,7 @@ async fn Session::fetch_personal(
     failures,
     _ => (),
     () => (),
+    incomplete=self.incomplete,
   )
   for scope, message in failures {
     self.errors.push({ source: "token:\{scope}", message, })
@@ -280,13 +285,21 @@ fn print_items(
   markers : Array[@domain.ReadMarker],
   saved : Map[String, Bool],
   errors : Array[FetchError],
+  incomplete? : Map[String, Bool] = Map([]),
 ) -> Int {
+  let warnings : Array[String] = []
+  for name, _ in incomplete {
+    warnings.push(
+      "\{name} hit the page limit; only the newest items are included",
+    )
+  }
   let filter = invocation.filter()
+  let index = @domain.read_index(markers)
   let visible = items.filter(item => {
     @domain.matches_filter(
       item,
       filter,
-      @domain.activity_is_read(markers, item.url, item.updated_at),
+      @domain.is_read_in(index, item.url, item.updated_at),
     )
   })
   visible.sort_by((a, b) => b.updated_at.compare(a.updated_at))
@@ -296,20 +309,24 @@ fn print_items(
       .map(item => {
         item_json(
           item,
-          @domain.activity_is_read(markers, item.url, item.updated_at),
+          @domain.is_read_in(index, item.url, item.updated_at),
           saved.contains(item.url),
         )
       })
       .to_json(),
       "errors": errors_json(errors),
+      "warnings": warnings.to_json(),
     }
     println(json.stringify())
   } else {
+    for warning in warnings {
+      println("warning: \{warning}")
+    }
     for item in visible {
       println(
         item_line(
           item,
-          @domain.activity_is_read(markers, item.url, item.updated_at),
+          @domain.is_read_in(index, item.url, item.updated_at),
           saved.contains(item.url),
         ),
       )
@@ -395,6 +412,7 @@ async fn run(invocation : Invocation) -> Int {
         load_markers(),
         saved,
         session.errors,
+        incomplete=session.incomplete,
       )
     }
     "for-you" => {
@@ -405,6 +423,21 @@ async fn run(invocation : Invocation) -> Int {
       }
       let (saved, muted) = load_triage()
       let lists = session.fetch_personal()
+      // Keep review requests GitHub dropped after a teammate reviewed for
+      // the team, until the viewer reviews too; the app does the same.
+      let follow_up = @activity_sync.follow_up_review_requests(
+        session.tokens,
+        session.repo_scopes,
+        session.owner_scopes,
+        @review_request_store.load_default().unwrap_or([]),
+        lists[0],
+        @activity_sync.saved_logins(),
+      )
+      match @review_request_store.save_default(follow_up.kept_urls) {
+        Ok(_) => ()
+        Err(error) =>
+          session.errors.push({ source: "review-requests", message: error, })
+      }
       let items = @activity_sync.personal_items(
         lists[0],
         lists[1],
@@ -413,8 +446,16 @@ async fn run(invocation : Invocation) -> Int {
         load_repositories(),
         muted,
         watched_only=true,
+        kept_review_requests=follow_up.pending,
       )
-      print_items(invocation, items, load_markers(), saved, session.errors)
+      print_items(
+        invocation,
+        items,
+        load_markers(),
+        saved,
+        session.errors,
+        incomplete=session.incomplete,
+      )
     }
     "saved" => {
       let (session, _) = load_session()

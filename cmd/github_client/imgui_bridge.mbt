@@ -114,6 +114,9 @@ extern "C" fn github_client_imgui_now() -> Double = "github_client_imgui_now"
 extern "C" fn github_client_imgui_exit(code : Int) -> Unit = "github_client_imgui_exit"
 
 ///|
+extern "C" fn github_client_imgui_clock() -> Double = "github_client_imgui_clock"
+
+///|
 fn imgui_init(window : @glfw.GLFWwindow) -> Bool {
   github_client_imgui_init(window) != 0
 }

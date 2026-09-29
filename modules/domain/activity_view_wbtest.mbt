@@ -46,7 +46,7 @@ test "rows are grouped by repository, newest first" {
   ]
   let rows = build_activity_rows(
     items,
-    [],
+    Map([]),
     Map([]),
     ActivityFilter::default(),
     Map([]),
@@ -66,7 +66,7 @@ test "two or more bot updates in a repository collapse into a bundle" {
   ]
   let collapsed = build_activity_rows(
     items,
-    [],
+    Map([]),
     Map([]),
     ActivityFilter::default(),
     Map([]),
@@ -75,7 +75,7 @@ test "two or more bot updates in a repository collapse into a bundle" {
   assert_eq(row_labels(collapsed), ["group owner/app", "#2", "bundle 2 false"])
   let expanded = build_activity_rows(
     items,
-    [],
+    Map([]),
     Map([]),
     ActivityFilter::default(),
     Map([(bundle_key("owner/app", "dependabot[bot]"), true)]),
@@ -90,7 +90,7 @@ test "two or more bot updates in a repository collapse into a bundle" {
 test "a single bot update stays a normal row" {
   let rows = build_activity_rows(
     [sample_item(1, author="dependabot[bot]")],
-    [],
+    Map([]),
     Map([]),
     ActivityFilter::default(),
     Map([]),
@@ -105,7 +105,7 @@ test "done items are hidden unless show_done is set" {
   let markers = [ReadMarker::new(item.url, item.updated_at)]
   let hidden = build_activity_rows(
     [item],
-    markers,
+    read_index(markers),
     Map([]),
     ActivityFilter::default(),
     Map([]),
@@ -114,7 +114,7 @@ test "done items are hidden unless show_done is set" {
   assert_eq(hidden.length(), 0)
   let shown = build_activity_rows(
     [item],
-    markers,
+    read_index(markers),
     Map([]),
     { ..ActivityFilter::default(), show_done: true, },
     Map([]),

@@ -3,6 +3,7 @@
 #include <moonbit.h>
 
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -534,6 +535,7 @@ static void gc_reason_colors(const std::string& reason, bool muted, ImU32* fg, I
   if (reason == "Review requested") { *fg = GC_ACCENT; *bg = GC_ACCENT_SUBTLE; *border = GC_ACCENT_BORDER; }
   else if (reason == "Assigned") { *fg = GC_SUCCESS; *bg = GC_SUCCESS_SUBTLE; *border = GC_SUCCESS_BORDER; }
   else if (reason == "Mentioned") { *fg = GC_DONE; *bg = GC_DONE_SUBTLE; *border = GC_DONE_BORDER; }
+  else if (reason == "Still needs your review") { *fg = GC_ATTENTION; *bg = GC_ATTENTION_SUBTLE; *border = GC_ATTENTION_BORDER; }
   else { *fg = GC_MUTED; *bg = GC_CANVAS; *border = GC_BORDER; }
   *fg = gc_alpha(*fg, a); *bg = gc_alpha(*bg, a); *border = gc_alpha(*border, a);
 }
@@ -1138,6 +1140,20 @@ static int gc_render_activity_page(const GcFrame& frame, float width, double now
   } else {
     for (const std::vector<std::string>& row : frame.rows) {
       const std::string type = gc_field(row, 0);
+      // Rows outside the scrolled viewport only reserve their height, so
+      // long lists cost little to draw.
+      const float row_h = type == "G" ? 40.0f : 60.0f;
+      if (!ImGui::IsRectVisible(ImVec2(list_w, row_h))) {
+        // Advance exactly as the drawn row would: group headers end with a
+        // Dummy, other rows move the cursor without item spacing.
+        if (type == "G") {
+          ImGui::Dummy(ImVec2(list_w, row_h));
+        } else {
+          const ImVec2 p = ImGui::GetCursorScreenPos();
+          ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + row_h));
+        }
+        continue;
+      }
       int row_action = 0;
       if (type == "G") gc_render_group(row, list_w);
       else if (type == "B") row_action = gc_render_bundle(row, list_w);
@@ -1850,6 +1866,12 @@ extern "C" void github_client_imgui_shutdown(void) {
 }
 
 extern "C" double github_client_imgui_now(void) { return ImGui::GetTime(); }
+
+// Wall-clock seconds with sub-millisecond resolution, for profiling. ImGui's
+// time only advances once per frame.
+extern "C" double github_client_imgui_clock(void) {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 // Ends the process after flushing output. Used only when a fetch task that
 // ignores cancellation would otherwise keep the process alive.

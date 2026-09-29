@@ -315,3 +315,29 @@ fn hidden_review_banners(
   })
   .filter(banner => !dismissed.contains(banner.key))
 }
+
+///|
+/// Lists that stopped at the page limit. Nothing is cut silently.
+fn incomplete_banners(
+  sources : Array[Map[String, Bool]],
+  dismissed : Map[String, Bool],
+) -> Array[Banner] {
+  let names : Array[String] = []
+  for source in sources {
+    for name, _ in source {
+      names.push(name)
+    }
+  }
+  if names.is_empty() || dismissed.contains("incomplete") {
+    return []
+  }
+  [
+    {
+      kind: "warning",
+      key: "incomplete",
+      title: "Some lists are too long to load completely.",
+      body: "Only the newest items are shown for \{names.join(", ")}: 2,000 per repository list and 1,000 per For you list.",
+      action: "",
+    },
+  ]
+}

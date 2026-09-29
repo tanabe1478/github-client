@@ -164,6 +164,7 @@ pub async fn fetch_personal_activity(
   assignments : Array[@github_api.ActivitySummary],
   mentions : Array[@github_api.ActivitySummary],
   subscriptions : Array[@github_api.ActivitySummary],
+  incomplete? : Map[String, Bool] = Map([]),
 ) -> String? {
   let errors : Array[String] = []
   let results = @async.all([
@@ -181,7 +182,12 @@ pub async fn fetch_personal_activity(
   for index, result in results {
     let (target, label) = targets[index]
     match result {
-      Ok(items) => append_unique_activities(target, items)
+      Ok(listing) => {
+        append_unique_activities(target, listing.items)
+        if !listing.complete {
+          incomplete.set("For you: \{label}", true)
+        }
+      }
       Err(error) => errors.push("\{label}: \{error}")
     }
   }
@@ -208,6 +214,7 @@ pub async fn refresh_personal_activity(
   failures : Map[String, String],
   on_start : (String) -> Unit,
   on_done : () -> Unit,
+  incomplete? : Map[String, Bool] = Map([]),
 ) -> Unit {
   // Tokens are fetched concurrently. Appends happen between suspension
   // points, so the shared lists stay consistent.
@@ -218,6 +225,7 @@ pub async fn refresh_personal_activity(
       defer on_done()
       fetch_scope_activity(
         scope, token, review_requests, assignments, mentions, subscriptions, failures,
+        incomplete,
       )
     }
   })
@@ -233,6 +241,7 @@ async fn fetch_scope_activity(
   mentions : Array[@github_api.ActivitySummary],
   subscriptions : Array[@github_api.ActivitySummary],
   failures : Map[String, String],
+  incomplete : Map[String, Bool],
 ) -> Unit {
   let login = match @credential_store.load_login_label(scope) {
     Some(login) => login
@@ -250,7 +259,13 @@ async fn fetch_scope_activity(
   }
   match
     fetch_personal_activity(
-      token, login, review_requests, assignments, mentions, subscriptions,
+      token,
+      login,
+      review_requests,
+      assignments,
+      mentions,
+      subscriptions,
+      incomplete~,
     ) {
     Some(error) => {
       failures.set(scope, error)
@@ -268,6 +283,7 @@ pub async fn fetch_repository_activity(
   repository : @domain.RepositoryRef,
   pull_requests : Array[@github_api.ActivitySummary],
   issues : Array[@github_api.ActivitySummary],
+  incomplete? : Map[String, Bool] = Map([]),
 ) -> String? {
   guard resolve_token(
       tokens,
@@ -288,17 +304,23 @@ pub async fn fetch_repository_activity(
       repository.owner(),
       repository.name(),
     ) {
-    Ok(items) => {
-      pull_request_count = items.length()
-      pull_requests.append(items)
+    Ok(listing) => {
+      pull_request_count = listing.items.length()
+      pull_requests.append(listing.items)
+      if !listing.complete {
+        incomplete.set("\{repository.key()} pull requests", true)
+      }
     }
     Err(error) => errors.push(error)
   }
   match
     @github_api.list_open_issues(token, repository.owner(), repository.name()) {
-    Ok(items) => {
-      issue_count = items.length()
-      issues.append(items)
+    Ok(listing) => {
+      issue_count = listing.items.length()
+      issues.append(listing.items)
+      if !listing.complete {
+        incomplete.set("\{repository.key()} issues", true)
+      }
     }
     Err(error) => errors.push(error)
   }
@@ -325,12 +347,19 @@ pub async fn fetch_watched_activity(
   issues : Array[@github_api.ActivitySummary],
   failures : Map[String, String],
   on_done : () -> Unit,
+  incomplete? : Map[String, Bool] = Map([]),
 ) -> Unit {
   let tasks = repositories.map(repository => {
     async fn() {
       match
         fetch_repository_activity(
-          tokens, repo_scopes, owner_scopes, repository, pull_requests, issues,
+          tokens,
+          repo_scopes,
+          owner_scopes,
+          repository,
+          pull_requests,
+          issues,
+          incomplete~,
         ) {
         Some(error) => {
           failures.set(repository.key(), error)
@@ -407,4 +436,126 @@ pub async fn fetch_activity(
     return Err("no saved token can access \{repository.owner()}")
   }
   @github_api.get_activity(token, repository.owner(), repository.name(), number)
+}
+
+///|
+/// Logins of every saved token, used to tell whether the viewer reviewed.
+pub fn saved_logins() -> Array[String] {
+  let logins : Array[String] = []
+  for scope in @credential_store.list_scopes() {
+    match @credential_store.load_login_label(scope) {
+      Some(login) if !logins.contains(login) => logins.push(login)
+      _ => ()
+    }
+  }
+  logins
+}
+
+///|
+/// A review request stays until the pull request closes or the viewer
+/// submits a review, even after GitHub drops a team's request because a
+/// teammate reviewed.
+pub fn keeps_review_request(
+  open : Bool,
+  reviewers : Array[String],
+  logins : Array[String],
+) -> Bool {
+  open && !reviewers.any(reviewer => logins.contains(reviewer))
+}
+
+///|
+pub(all) struct ReviewFollowUp {
+  /// Pull requests GitHub no longer lists that still need the viewer.
+  pending : Array[@github_api.ActivitySummary]
+  /// URLs to remember for the next refresh.
+  kept_urls : Array[String]
+}
+
+///|
+/// Remembers every review request seen in `current` and checks the ones
+/// GitHub stopped listing. A request whose pull request cannot be read for
+/// a transient reason is kept and checked again next time.
+pub async fn follow_up_review_requests(
+  tokens : Map[String, String],
+  repo_scopes : Map[String, String],
+  owner_scopes : Map[String, String],
+  kept_urls : Array[String],
+  current : Array[@github_api.ActivitySummary],
+  logins : Array[String],
+) -> ReviewFollowUp {
+  let current_urls = current.map(activity => activity.html_url())
+  let missing = kept_urls.filter(url => !current_urls.contains(url))
+  let checks = @async.all(
+    missing.map(url => {
+      async fn() -> (String, Bool, @github_api.ActivitySummary?) {
+        guard parse_activity_url(url) is Ok((repository, number)) else {
+          return (url, false, None)
+        }
+        guard resolve_token(
+            tokens,
+            repo_scopes,
+            owner_scopes,
+            repository.owner(),
+            repository.name(),
+          )
+          is Some(token) else {
+          return (url, true, None)
+        }
+        match
+          @github_api.get_pull_request_state(
+            token,
+            repository.owner(),
+            repository.name(),
+            number,
+          ) {
+          Ok((activity, open)) => {
+            if !open {
+              return (url, false, None)
+            }
+            match
+              @github_api.list_review_authors(
+                token,
+                repository.owner(),
+                repository.name(),
+                number,
+              ) {
+              Ok(reviewers) =>
+                if keeps_review_request(open, reviewers, logins) {
+                  (url, true, Some(activity))
+                } else {
+                  (url, false, None)
+                }
+              Err(error) => {
+                @github_api.log("review-follow-up: \{url}: \{error}")
+                (url, true, None)
+              }
+            }
+          }
+          Err(error) => {
+            @github_api.log("review-follow-up: \{url}: \{error}")
+            // A pull request that no longer exists or is out of reach is
+            // dropped; other failures are retried next time.
+            let keep = !(@github_api.classify_failure(error) is NotFound)
+            (url, keep, None)
+          }
+        }
+      }
+    }),
+    max_concurrent=6,
+  )
+  let dropped = checks.filter(check => !check.1).map(check => check.0)
+  let next = kept_urls.filter(url => !dropped.contains(url))
+  for url in current_urls {
+    if !next.contains(url) {
+      next.push(url)
+    }
+  }
+  let pending : Array[@github_api.ActivitySummary] = []
+  for check in checks {
+    match check.2 {
+      Some(activity) => pending.push(activity)
+      None => ()
+    }
+  }
+  { pending, kept_urls: next, }
 }

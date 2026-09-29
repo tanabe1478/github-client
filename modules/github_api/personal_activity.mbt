@@ -91,44 +91,37 @@ pub fn decode_subscribed_issues(
 }
 
 ///|
-async fn search_personal_activity(
-  token : String,
-  path : String,
-) -> Result[Array[ActivitySummary], String] {
-  match get_json(token, path) {
-    Ok(json) => decode_personal_activity_search(json)
-    Err(error) => Err(error)
+fn search_items_length(json : Json) -> Int {
+  match json {
+    Object(fields) =>
+      match fields.get("items") {
+        Some(Array(items)) => items.length()
+        _ => 0
+      }
+    _ => 0
   }
 }
 
 ///|
+/// Personal issues and pull requests for one filter, up to 1,000.
 async fn list_personal_issues(
   token : String,
   filter : String,
-) -> Result[Array[ActivitySummary], String] {
-  let result : Array[ActivitySummary] = []
-  for page = 1; page <= 10; page = page + 1 {
-    let json = match get_json(token, personal_issues_path(filter, page)) {
-      Ok(json) => json
-      Err(error) => return Err(error)
-    }
-    guard decode_subscribed_issues(json) is Ok(items) else {
-      return Err("GitHub personal activity response could not be decoded")
-    }
-    let count = items.length()
-    result.append(items)
-    if count < 100 {
-      break
-    }
-  }
-  Ok(result)
+) -> Result[Listing, String] {
+  get_all_pages(
+    token,
+    page => personal_issues_path(filter, page),
+    10,
+    decode_subscribed_issues,
+    json_array_length,
+  )
 }
 
 ///|
 pub async fn search_mentions(
   token : String,
   _login : String,
-) -> Result[Array[ActivitySummary], String] {
+) -> Result[Listing, String] {
   list_personal_issues(token, "mentioned")
 }
 
@@ -136,21 +129,27 @@ pub async fn search_mentions(
 pub async fn search_assignments(
   token : String,
   _login : String,
-) -> Result[Array[ActivitySummary], String] {
+) -> Result[Listing, String] {
   list_personal_issues(token, "assigned")
 }
 
 ///|
+/// Open pull requests requesting the viewer's review, directly or through
+/// a team. GitHub search returns at most 1,000 results.
 pub async fn search_review_requests(
   token : String,
   login : String,
-) -> Result[Array[ActivitySummary], String] {
-  search_personal_activity(token, review_requests_search_path(login))
+) -> Result[Listing, String] {
+  get_all_pages(
+    token,
+    page => review_requests_search_path(login, page),
+    10,
+    decode_personal_activity_search,
+    search_items_length,
+  )
 }
 
 ///|
-pub async fn list_subscribed_issues(
-  token : String,
-) -> Result[Array[ActivitySummary], String] {
+pub async fn list_subscribed_issues(token : String) -> Result[Listing, String] {
   list_personal_issues(token, "subscribed")
 }

@@ -38,3 +38,11 @@ test "resolve_token prefers the owner scope, then the default token" {
     Some("a"),
   )
 }
+
+///|
+test "a review request is kept until the viewer reviews or it closes" {
+  let logins = ["tanabe1478"]
+  assert_true(keeps_review_request(true, ["teammate"], logins))
+  assert_false(keeps_review_request(true, ["teammate", "tanabe1478"], logins))
+  assert_false(keeps_review_request(false, [], logins))
+}

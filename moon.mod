@@ -9,6 +9,7 @@ import {
   "tanabe1478/github-client-domain@0.1.0",
   "tanabe1478/github-client-github-api@0.1.0",
   "tanabe1478/github-client-repository-store@0.1.0",
+  "tanabe1478/github-client-review-request-store@0.1.0",
   "tanabe1478/github-client-read-state-store@0.1.0",
   "tanabe1478/github-client-triage-store@0.1.0",
   "mizchi/glfw@0.2.3",

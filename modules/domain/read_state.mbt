@@ -72,3 +72,36 @@ pub fn repository_is_watched(
   let normalized = repository.to_lower()
   repositories.any(item => item.key().to_lower() == normalized)
 }
+
+///|
+/// Read markers keyed by URL, for looking up many items at once.
+pub fn read_index(markers : Array[ReadMarker]) -> Map[String, String] {
+  let index : Map[String, String] = Map([])
+  for marker in markers {
+    index.set(marker.url, marker.read_at)
+  }
+  index
+}
+
+///|
+pub fn is_read_in(
+  index : Map[String, String],
+  url : String,
+  updated_at : String,
+) -> Bool {
+  match index.get(url) {
+    Some(read_at) => read_at >= updated_at
+    None => false
+  }
+}
+
+///|
+/// Drops markers whose URL is not in `keep`. Called after a complete
+/// refresh: an item missing from every list is closed or out of scope, so
+/// its marker only makes later lookups slower.
+pub fn prune_markers(
+  markers : Array[ReadMarker],
+  keep : Map[String, Bool],
+) -> Array[ReadMarker] {
+  markers.filter(marker => keep.contains(marker.url))
+}

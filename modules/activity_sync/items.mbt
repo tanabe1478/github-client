@@ -50,11 +50,16 @@ pub fn personal_items(
   watched : Array[@domain.RepositoryRef],
   muted : Map[String, Bool],
   watched_only~ : Bool,
+  kept_review_requests? : Array[@github_api.ActivitySummary] = [],
 ) -> Array[@domain.ActivityItem] {
   let items : Array[@domain.ActivityItem] = []
   let indices : Map[String, Int] = Map([])
   let sources = [
     (review_requests, "Review requested"),
+    // GitHub dropped these requests, usually because a teammate reviewed
+    // for the team, but the viewer has not reviewed yet.
+    (kept_review_requests, "Review requested"),
+    (kept_review_requests, "Still needs your review"),
     (assignments, "Assigned"),
     (mentions, "Mentioned"),
     (subscriptions, "Subscribed"),
@@ -97,9 +102,9 @@ pub fn saved_items(
 ///|
 pub fn unread_count(
   items : Array[@domain.ActivityItem],
-  markers : Array[@domain.ReadMarker],
+  index : Map[String, String],
 ) -> Int {
   items
-  .filter(item => !@domain.activity_is_read(markers, item.url, item.updated_at))
+  .filter(item => !@domain.is_read_in(index, item.url, item.updated_at))
   .length()
 }

@@ -212,6 +212,9 @@ async fn main {
   let assignments : Array[@github_api.ActivitySummary] = []
   let mentions : Array[@github_api.ActivitySummary] = []
   let subscriptions : Array[@github_api.ActivitySummary] = []
+  // Review requests GitHub dropped (usually after a teammate reviewed for
+  // the team) that still wait for the viewer's own review.
+  let kept_review_requests : Array[@github_api.ActivitySummary] = []
   let mut read_markers : Array[@domain.ReadMarker] = match
     @read_state_store.load_default() {
     Ok(markers) => markers
@@ -241,6 +244,9 @@ async fn main {
   let broken_scopes : Map[String, String] = Map([])
   let scope_failures : Map[String, String] = Map([])
   let repository_failures : Map[String, String] = Map([])
+  // Lists that hit the page limit, so only their newest items are shown.
+  let watched_incomplete : Map[String, Bool] = Map([])
+  let personal_incomplete : Map[String, Bool] = Map([])
   for scope in @credential_store.list_scopes() {
     match @credential_store.load_token_for(scope) {
       Ok(Some(token)) => saved_tokens.set(scope, token)
@@ -279,6 +285,14 @@ async fn main {
   let dismissed_banners : Map[String, Bool] = Map([])
   let control_queue : Array[ControlCommand] = []
   let control_path = @app_paths.data_file("control.txt").unwrap_or("")
+  // Commands left from before this launch were meant for an earlier
+  // instance; a stale `quit` would otherwise close this one at once.
+  if control_path != "" && @fs.path_exists(control_path) {
+    @fs.remove_file(control_path) catch {
+      _ => ()
+    }
+    println("control: discarded commands left from before launch")
+  }
   if !@glfw.glfw_init() {
     println("github-client: GLFW initialization failed")
     return
@@ -409,6 +423,7 @@ async fn main {
     next_issues : Array[@github_api.ActivitySummary],
   ) -> Unit {
     repository_failures.clear()
+    watched_incomplete.clear()
     loading_detail = "Watched repositories"
     @activity_sync.fetch_watched_activity(
       saved_tokens,
@@ -419,6 +434,7 @@ async fn main {
       next_issues,
       repository_failures,
       () => loading_done += 1,
+      incomplete=watched_incomplete,
     )
   }
 
@@ -449,9 +465,12 @@ async fn main {
     last_synced = Some(imgui_now())
   }
 
+  // `next` holds review requests, assignments, mentions, subscriptions,
+  // and kept review requests. Returns the review request URLs to remember.
   async fn fetch_personal(
     next : Array[Array[@github_api.ActivitySummary]],
-  ) -> Unit {
+  ) -> Array[String] {
+    personal_incomplete.clear()
     @activity_sync.refresh_personal_activity(
       saved_tokens,
       next[0],
@@ -461,12 +480,24 @@ async fn main {
       scope_failures,
       _ => loading_detail = "For you and watched repositories",
       () => loading_done += 1,
+      incomplete=personal_incomplete,
     )
+    let follow_up = @activity_sync.follow_up_review_requests(
+      saved_tokens,
+      repo_scopes,
+      owner_scopes,
+      @review_request_store.load_default().unwrap_or([]),
+      next[0],
+      @activity_sync.saved_logins(),
+    )
+    next[4].append(follow_up.pending)
+    follow_up.kept_urls
   }
 
   fn commit_personal(
     generation : Int,
     next : Array[Array[@github_api.ActivitySummary]],
+    kept_urls : Array[String],
   ) -> Unit {
     if generation != active_generation {
       return
@@ -476,13 +507,18 @@ async fn main {
     @activity_sync.replace_activities(assignments, next[1])
     @activity_sync.replace_activities(mentions, next[2])
     @activity_sync.replace_activities(subscriptions, next[3])
+    @activity_sync.replace_activities(kept_review_requests, next[4])
+    match @review_request_store.save_default(kept_urls) {
+      Ok(_) => ()
+      Err(error) => println("review-request-store: save failed: \{error}")
+    }
     last_synced = Some(imgui_now())
   }
 
   async fn load_personal(generation : Int) -> Unit {
-    let next = [[], [], [], []]
-    fetch_personal(next)
-    commit_personal(generation, next)
+    let next = [[], [], [], [], []]
+    let kept_urls = fetch_personal(next)
+    commit_personal(generation, next, kept_urls)
   }
 
   async fn load_watched(generation : Int) -> Unit {
@@ -668,12 +704,13 @@ async fn main {
         loading_total = saved_tokens.length() + model.repositories().length()
         let next_pull_requests = []
         let next_issues = []
-        let next_personal = [[], [], [], []]
+        let next_personal = [[], [], [], [], []]
+        let mut kept_urls : Array[String] = []
         scope_failures.clear()
         ignore(
           @async.all([
             async fn() { fetch_watched(next_pull_requests, next_issues) },
-            async fn() { fetch_personal(next_personal) },
+            async fn() { kept_urls = fetch_personal(next_personal) },
           ]),
         )
         // Compare against the seen revisions before committing: every frame
@@ -682,7 +719,7 @@ async fn main {
         let fresh : Array[(@github_api.ActivitySummary, String)] = []
         let fresh_urls : Map[String, Bool] = Map([])
         let reasons = [
-          "Review requested", "Assigned", "Mentioned", "Subscribed",
+          "Review requested", "Assigned", "Mentioned", "Subscribed", "Review requested",
         ]
         let candidates : Array[(@github_api.ActivitySummary, String)] = []
         for activity in next_pull_requests {
@@ -711,7 +748,7 @@ async fn main {
           return
         }
         commit_watched(generation, next_pull_requests, next_issues)
-        commit_personal(generation, next_personal)
+        commit_personal(generation, next_personal, kept_urls)
         println("auto-refresh: fresh=\{fresh.length()}")
         notify_fresh_activities(fresh)
       }
@@ -763,6 +800,45 @@ async fn main {
     }
   }
 
+  // After a complete refresh, done and mute records for URLs that no list
+  // holds any more (closed or out of scope) are removed so they do not pile
+  // up. Saved URLs are always kept.
+  fn prune_stale_records() -> Unit {
+    let keep : Map[String, Bool] = Map([])
+    for
+      activities in [
+        pull_requests, issues, review_requests, assignments, mentions, subscriptions,
+        kept_review_requests,
+      ] {
+      for activity in activities {
+        keep.set(activity.html_url(), true)
+      }
+    }
+    for url, _ in saved_urls {
+      keep.set(url, true)
+    }
+    let before_markers = read_markers.length()
+    read_markers = @domain.prune_markers(read_markers, keep)
+    let stale_muted : Array[String] = []
+    for url, _ in muted_urls {
+      if !keep.contains(url) {
+        stale_muted.push(url)
+      }
+    }
+    for url in stale_muted {
+      muted_urls.remove(url)
+    }
+    if read_markers.length() != before_markers {
+      save_read_markers()
+    }
+    if !stale_muted.is_empty() {
+      save_triage()
+    }
+    println(
+      "prune: markers \{before_markers} -> \{read_markers.length()}, muted -\{stale_muted.length()}",
+    )
+  }
+
   fn job_finished() -> Unit {
     // A rate limit pauses auto refresh until GitHub resets it.
     for failures in [scope_failures, repository_failures] {
@@ -796,6 +872,14 @@ async fn main {
   let mut last_auto_refresh = imgui_now()
   let mut last_control_poll = imgui_now()
   let mut last_file_poll = imgui_now()
+  // GITHUB_CLIENT_PROFILE=1 logs the average time per frame spent building
+  // rows (MoonBit) and rendering them (Dear ImGui), every 120 frames.
+  let profiling = @sys.get_env_var("GITHUB_CLIENT_PROFILE") == Some("1")
+  let mut profile_frames = 0
+  let mut profile_build = 0.0
+  let mut profile_render = 0.0
+  let mut indexed_markers = read_markers
+  let mut read_lookup = @domain.read_index(read_markers)
   @async.with_task_group(group => {
     while !@glfw.window_should_close(window) {
       @glfw.poll_events()
@@ -937,6 +1021,12 @@ async fn main {
                 Some(message) => notify(message, None)
                 None => ()
               }
+              if job
+                is (Startup | Credentials(_) | Everything | Auto | External) &&
+                watched_incomplete.is_empty() &&
+                personal_incomplete.is_empty() {
+                prune_stale_records()
+              }
             }
             job_finished()
           }),
@@ -993,6 +1083,17 @@ async fn main {
         Some(job) => job.is_cancellable()
         None => false
       }
+      let frame_started = if profiling {
+        github_client_imgui_clock()
+      } else {
+        0.0
+      }
+      // Every change to the markers produces a new array, so the lookup
+      // table is rebuilt only when the array itself changed.
+      if !physical_equal(indexed_markers, read_markers) {
+        read_lookup = @domain.read_index(read_markers)
+        indexed_markers = read_markers
+      }
       // Rows for the current page.
       let page = model.page()
       let filter = imgui_view_filter()
@@ -1009,13 +1110,14 @@ async fn main {
         watched,
         muted_urls,
         watched_only=true,
+        kept_review_requests~,
       )
       let (rows, show_repository) = match page {
         Inbox | PullRequests | Issues =>
           (
             @domain.build_activity_rows(
               inbox_items,
-              read_markers,
+              read_lookup,
               saved_urls,
               { ..filter, reason: "", },
               expanded_bundles,
@@ -1027,7 +1129,7 @@ async fn main {
           (
             @domain.build_activity_rows(
               for_you_items,
-              read_markers,
+              read_lookup,
               saved_urls,
               {
                 ..@domain.ActivityFilter::default(),
@@ -1050,7 +1152,7 @@ async fn main {
                 saved_urls,
                 muted_urls,
               ),
-              read_markers,
+              read_lookup,
               saved_urls,
               { ..@domain.ActivityFilter::default(), show_done: true, },
               expanded_bundles,
@@ -1065,9 +1167,9 @@ async fn main {
           fresh_since.remove(key)
         }
       }
-      let inbox_unread = @activity_sync.unread_count(inbox_items, read_markers)
+      let inbox_unread = @activity_sync.unread_count(inbox_items, read_lookup)
       let for_you_unread = @activity_sync.unread_count(
-        for_you_items, read_markers,
+        for_you_items, read_lookup,
       )
       let header = match page {
         Inbox | PullRequests | Issues => {
@@ -1096,10 +1198,19 @@ async fn main {
             has_data,
             dismissed_banners,
           )
+          problems.append(
+            incomplete_banners(
+              [watched_incomplete, personal_incomplete],
+              dismissed_banners,
+            ),
+          )
           if page is ForYou {
             problems.append(
               hidden_review_banners(
-                review_requests, watched, muted_urls, dismissed_banners,
+                [..review_requests, ..kept_review_requests],
+                watched,
+                muted_urls,
+                dismissed_banners,
               ),
             )
           }
@@ -1131,6 +1242,7 @@ async fn main {
       let has_credentials = !@credential_store.list_scopes().is_empty()
       let flags = (if has_credentials { 1 } else { 0 }) |
         (if cancellable { 2 } else { 0 })
+      let rows_built = if profiling { github_client_imgui_clock() } else { 0.0 }
       let action = github_client_imgui_render(
         window,
         page.code(),
@@ -1142,7 +1254,11 @@ async fn main {
         "\{safe_row_text(header)}\t\{synced_label(last_synced, now)}",
         serialize_rows(rows, show_repository, fresh_since, now),
         repositories_text(watched),
-        suggestions_text(suggested_repositories, watched, review_requests),
+        suggestions_text(
+          suggested_repositories,
+          watched,
+          [..review_requests, ..kept_review_requests],
+        ),
         credentials_text(credential_problems),
         banners_text(banners),
         loading,
@@ -1152,6 +1268,20 @@ async fn main {
         page_error,
       )
       token_prefill = ""
+      if profiling {
+        let rendered = github_client_imgui_clock()
+        profile_frames += 1
+        profile_build += rows_built - frame_started
+        profile_render += rendered - rows_built
+        if profile_frames == 120 {
+          println(
+            "profile: build_ms=\{profile_build / 120.0 * 1000.0} render_ms=\{profile_render / 120.0 * 1000.0} markers=\{read_markers.length()} page=\{model.page().name()}",
+          )
+          profile_frames = 0
+          profile_build = 0.0
+          profile_render = 0.0
+        }
+      }
       let mut action = action
       // Commands wait while a fetch runs, as the loading dialog blocks UI
       // input; quit and cancel always go through.

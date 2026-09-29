@@ -3,6 +3,7 @@ import {
   "moonbitlang/async",
   "moonbitlang/async/shell" @async_shell,
   "moonbitlang/x/fs",
+  "moonbitlang/x/sys",
   "moonbit-community/proton_shell" @shell,
   "tanabe1478/github-client-activity-sync" @activity_sync,
   "tanabe1478/github-client-app-paths" @app_paths,
@@ -10,6 +11,7 @@ import {
   "tanabe1478/github-client-domain" @domain,
   "tanabe1478/github-client-github-api" @github_api,
   "tanabe1478/github-client-repository-store" @repository_store,
+  "tanabe1478/github-client-review-request-store" @review_request_store,
   "tanabe1478/github-client-read-state-store" @read_state_store,
   "tanabe1478/github-client-triage-store" @triage_store,
 }

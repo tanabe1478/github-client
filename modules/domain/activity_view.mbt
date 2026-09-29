@@ -117,9 +117,11 @@ pub fn bundle_key(repository : String, author : String) -> String {
 ///|
 /// Builds the rows a list shows: filtered, newest first, and for
 /// `ByRepository` grouped under repository headers with bot updates bundled.
+/// `index` comes from `read_index`; callers keep it between frames and
+/// rebuild it only when the markers change.
 pub fn build_activity_rows(
   items : Array[ActivityItem],
-  markers : Array[ReadMarker],
+  index : Map[String, String],
   saved : Map[String, Bool],
   filter : ActivityFilter,
   expanded : Map[String, Bool],
@@ -127,11 +129,7 @@ pub fn build_activity_rows(
 ) -> Array[ActivityRow] {
   let visible = items
     .filter(item => {
-      matches_filter(
-        item,
-        filter,
-        activity_is_read(markers, item.url, item.updated_at),
-      )
+      matches_filter(item, filter, is_read_in(index, item.url, item.updated_at))
     })
     .copy()
   // Newest first; the sort is stable so equal timestamps keep API order.
@@ -139,7 +137,7 @@ pub fn build_activity_rows(
   let row_of = (item : ActivityItem, nested : Bool) => {
     Item(
       item,
-      read=activity_is_read(markers, item.url, item.updated_at),
+      read=is_read_in(index, item.url, item.updated_at),
       saved=saved.contains(item.url),
       nested~,
     )
@@ -187,9 +185,7 @@ pub fn build_activity_rows(
           let key = bundle_key(repository, item.author)
           let is_expanded = expanded.contains(key)
           let unread = bundle_items
-            .filter(entry => {
-              !activity_is_read(markers, entry.url, entry.updated_at)
-            })
+            .filter(entry => !is_read_in(index, entry.url, entry.updated_at))
             .length()
           rows.push(
             Bundle(

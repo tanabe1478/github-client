@@ -41,3 +41,33 @@ test "decode_activity reads a pull request from the issues endpoint" {
   assert_true(activity.kind() is PullRequest)
   assert_eq(activity.updated_at(), "2026-09-30T00:00:00Z")
 }
+
+///|
+test "decode_pull_request_state reports merged pull requests as not open" {
+  let json : Json = {
+    "number": 5,
+    "title": "Ship it",
+    "html_url": "https://github.com/owner/app/pull/5",
+    "user": { "login": "octocat" },
+    "updated_at": "2026-09-30T00:00:00Z",
+    "draft": false,
+    "state": "closed",
+    "merged": true,
+  }
+  guard decode_pull_request_state(json, "owner/app") is Ok((_, open)) else {
+    fail("expected a pull request")
+  }
+  assert_false(open)
+}
+
+///|
+test "decode_review_authors skips pending and dismissed reviews" {
+  let json : Json = [
+    { "user": { "login": "alice" }, "state": "APPROVED" },
+    { "user": { "login": "bob" }, "state": "PENDING" },
+    { "user": { "login": "carol" }, "state": "DISMISSED" },
+    { "user": { "login": "alice" }, "state": "COMMENTED" },
+    { "user": null, "state": "COMMENTED" },
+  ]
+  assert_eq(decode_review_authors(json), Ok(["alice"]))
+}

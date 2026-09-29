@@ -15,17 +15,33 @@ fn request_headers(token : String) -> @http.Headers {
 }
 
 ///|
+/// Last response per token and path, with its ETag. GitHub answers a
+/// request carrying the ETag with 304 Not Modified and an empty body when
+/// nothing changed; 304 responses do not count against the rate limit.
+let etag_cache : Map[String, (String, Json)] = Map([])
+
+///|
 async fn get_json(token : String, path : String) -> Result[Json, String] {
   try {
     let started = @async.now()
-    let (response, body) = @http.get(
-      "https://api.github.com\{path}",
-      headers=request_headers(token),
-    )
+    let cache_key = "\{token.hash()}|\{path}"
+    let headers = request_headers(token)
+    match etag_cache.get(cache_key) {
+      Some((etag, _)) =>
+        headers.set(@http.CaseInsensitiveString("If-None-Match"), etag)
+      None => ()
+    }
+    let (response, body) = @http.get("https://api.github.com\{path}", headers~)
     let fetched = @async.now()
     defer log(
       "http: status=\{response.code} fetch_ms=\{fetched - started} path=\{path}",
     )
+    if response.code == 304 {
+      match etag_cache.get(cache_key) {
+        Some((_, json)) => return Ok(json)
+        None => return Err("GitHub request failed with status 304")
+      }
+    }
     if response.code == 401 {
       return Err("GitHub rejected the saved token")
     }
@@ -49,6 +65,10 @@ async fn get_json(token : String, path : String) -> Result[Json, String] {
     }
     let json = body.json()
     log("http: parse_ms=\{@async.now() - fetched} path=\{path}")
+    match response.headers.get(@http.CaseInsensitiveString("ETag")) {
+      Some(etag) => etag_cache.set(cache_key, (etag, json))
+      None => ()
+    }
     Ok(json)
   } catch {
     _ => Err("GitHub request failed before a response was received")
@@ -115,4 +135,52 @@ pub fn set_logger(write : (String) -> Unit) -> Unit {
 ///|
 pub fn log(message : String) -> Unit {
   (logger.val)(message)
+}
+
+///|
+/// Items from a paged list endpoint. `complete` is false when the page
+/// limit stopped the listing before its last page.
+pub(all) struct Listing {
+  items : Array[ActivitySummary]
+  complete : Bool
+}
+
+///|
+/// GitHub pages hold at most 100 items.
+const PAGE_SIZE : Int = 100
+
+///|
+fn json_array_length(json : Json) -> Int {
+  match json {
+    Array(items) => items.length()
+    _ => 0
+  }
+}
+
+///|
+/// Fetches pages 1..`max_pages` until a page holds fewer than 100 raw
+/// entries. `decode` turns one page into items; `raw_count` counts the
+/// entries GitHub returned on it, which can exceed the items kept.
+async fn get_all_pages(
+  token : String,
+  path_for : (Int) -> String,
+  max_pages : Int,
+  decode : (Json) -> Result[Array[ActivitySummary], String],
+  raw_count : (Json) -> Int,
+) -> Result[Listing, String] {
+  let items : Array[ActivitySummary] = []
+  for page = 1; page <= max_pages; page = page + 1 {
+    let json = match get_json(token, path_for(page)) {
+      Ok(json) => json
+      Err(error) => return Err(error)
+    }
+    match decode(json) {
+      Ok(decoded) => items.append(decoded)
+      Err(error) => return Err(error)
+    }
+    if raw_count(json) < PAGE_SIZE {
+      return Ok({ items, complete: true, })
+    }
+  }
+  Ok({ items, complete: false, })
 }

@@ -10,12 +10,12 @@ test "routes cover only the product API surface" {
     content="/issues?filter=mentioned&state=open&sort=updated&direction=desc&per_page=100&page=2",
   )
   inspect(
-    review_requests_search_path("octocat"),
-    content="/search/issues?q=is%3Aopen+is%3Apr+review-requested%3Aoctocat&sort=updated&order=desc&per_page=50",
+    review_requests_search_path("octocat", 2),
+    content="/search/issues?q=is%3Aopen+is%3Apr+review-requested%3Aoctocat&sort=updated&order=desc&per_page=100&page=2",
   )
   inspect(
-    repository_pulls_path("moonbitlang", "moonbit"),
-    content="/repos/moonbitlang/moonbit/pulls?state=open&sort=updated&direction=desc&per_page=50",
+    repository_pulls_path("moonbitlang", "moonbit", 1),
+    content="/repos/moonbitlang/moonbit/pulls?state=open&sort=updated&direction=desc&per_page=100&page=1",
   )
   inspect(
     repository_sbom_path("acme", "desktop"),

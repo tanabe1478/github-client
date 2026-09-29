@@ -22,6 +22,8 @@ Repository code is the source of truth for behavior, accessibility, security, pl
 
 Each row has two lines: the title, and a meta line with `#number`, `@author`, `updated <date>`, and `Done` / `Draft` / `Saved` labels. Unread rows show a blue dot and a bold title; the icon shows pull request, draft pull request, or issue. For you and Saved rows also show the repository, and For you rows start the meta line with reason labels: `Review requested` (blue), `Assigned` (green), `Mentioned` (purple), and `Subscribed` (neutral). Labels carry their text, so color is never the only signal.
 
+Review requests include requests to the viewer's teams. GitHub removes a team's request once a teammate reviews, so the app remembers every pull request that requested the viewer's review (`review-requests.txt`). When GitHub no longer lists one, the app checks the pull request and keeps it in For you with a `Still needs your review` label (yellow) until the viewer submits a review or the pull request closes or merges. Pending and dismissed reviews do not count.
+
 Every row has explicit trailing actions: `Open`, `Done` (or `Move to inbox` for done rows), a Save toggle, and a More actions button. The menu holds `Copy link`, `Show only this repository`, and, separated below them, `Unsubscribe`. Row click and double click are not actions.
 
 In Inbox, two or more updates from `dependabot[bot]` or `renovate[bot]` in one repository collapse into one row with `Show N` / `Hide` and `Done all`.
@@ -45,6 +47,14 @@ Repository API calls resolve their credential automatically: an exact owner scop
 - Banners above the list, each dismissible: a rejected token (401) or a token the Keychain cannot read, with `Replace token`; a rate limit, with the time auto refresh resumes; denied requests; GitHub unreachable while older results are shown; and repositories that failed while the rest refreshed, with `Retry`.
 - For you shows an info banner when review requests are hidden because their repository is not watched, with `Watch repository`.
 - The token dialog shows errors under the field they concern: an invalid owner name or a token GitHub rejected. Settings rows show token problems with `Replace`.
+
+## Fetching
+
+Every list is read to its last page, 100 items per request: up to 2,000 open pull requests and 2,000 open issues per watched repository, and up to 1,000 items for each For you source (GitHub search itself stops at 1,000). A list that reaches its limit shows a warning banner naming it instead of being cut silently.
+
+Requests carry the ETag of the previous response. GitHub then answers unchanged lists with 304 Not Modified and no body, which GitHub does not count against the rate limit. Measured on this data, 304 responses took as long as full ones, so this saves rate limit and bandwidth rather than time.
+
+After a refresh that loaded Inbox and For you completely without errors, done and mute records for URLs no list holds any more (closed, merged, or out of scope) are removed, so they do not accumulate. Saved URLs are always kept. An item that reopens later shows as unread again.
 
 ## Loading state
 

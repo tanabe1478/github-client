@@ -17,8 +17,8 @@ pub fn personal_issues_path(filter : String, page : Int) -> String {
 }
 
 ///|
-pub fn review_requests_search_path(login : String) -> String {
-  "/search/issues?q=is%3Aopen+is%3Apr+review-requested%3A\{login}&sort=updated&order=desc&per_page=50"
+pub fn review_requests_search_path(login : String, page : Int) -> String {
+  "/search/issues?q=is%3Aopen+is%3Apr+review-requested%3A\{login}&sort=updated&order=desc&per_page=100&page=\{page}"
 }
 
 ///|
@@ -27,8 +27,12 @@ pub fn repository_path(owner : String, name : String) -> String {
 }
 
 ///|
-pub fn repository_issues_path(owner : String, name : String) -> String {
-  "/repos/\{owner}/\{name}/issues?state=open&sort=updated&direction=desc&per_page=50"
+pub fn repository_issues_path(
+  owner : String,
+  name : String,
+  page : Int,
+) -> String {
+  "/repos/\{owner}/\{name}/issues?state=open&sort=updated&direction=desc&per_page=100&page=\{page}"
 }
 
 ///|
@@ -41,8 +45,26 @@ pub fn repository_issue_path(
 }
 
 ///|
-pub fn repository_pulls_path(owner : String, name : String) -> String {
-  "/repos/\{owner}/\{name}/pulls?state=open&sort=updated&direction=desc&per_page=50"
+pub fn pull_request_path(owner : String, name : String, number : Int) -> String {
+  "/repos/\{owner}/\{name}/pulls/\{number}"
+}
+
+///|
+pub fn pull_request_reviews_path(
+  owner : String,
+  name : String,
+  number : Int,
+) -> String {
+  "/repos/\{owner}/\{name}/pulls/\{number}/reviews?per_page=100"
+}
+
+///|
+pub fn repository_pulls_path(
+  owner : String,
+  name : String,
+  page : Int,
+) -> String {
+  "/repos/\{owner}/\{name}/pulls?state=open&sort=updated&direction=desc&per_page=100&page=\{page}"
 }
 
 ///|
