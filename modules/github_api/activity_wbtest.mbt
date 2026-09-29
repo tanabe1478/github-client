@@ -24,3 +24,20 @@ test "pull request response decodes display fields" {
   inspect(pulls[0].author(), content="octocat")
   assert_true(pulls[0].is_draft())
 }
+
+///|
+test "decode_activity reads a pull request from the issues endpoint" {
+  let json : Json = {
+    "number": 7,
+    "title": "Add CLI",
+    "html_url": "https://github.com/owner/app/pull/7",
+    "user": { "login": "octocat" },
+    "updated_at": "2026-09-30T00:00:00Z",
+    "pull_request": { "url": "https://api.github.com/repos/owner/app/pulls/7" },
+  }
+  guard decode_activity(json, "owner/app") is Ok(activity) else {
+    fail("expected an activity")
+  }
+  assert_true(activity.kind() is PullRequest)
+  assert_eq(activity.updated_at(), "2026-09-30T00:00:00Z")
+}

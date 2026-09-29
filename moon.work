@@ -1,5 +1,6 @@
 members = [
   ".",
+  "modules/activity_sync",
   "modules/app_paths",
   "modules/credential_store",
   "modules/domain",

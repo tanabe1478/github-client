@@ -33,7 +33,7 @@ In Inbox, two or more updates from `dependabot[bot]` or `renovate[bot]` in one r
 
 Done, Move to inbox, Done all, Save, Unsubscribe, and Unwatch confirm the result in a snackbar with `Undo`. Other results use the same snackbar without Undo.
 
-Done state persists in the read-state store; saved and muted URLs persist in the triage store.
+Done state persists in the read-state store; saved and muted URLs persist in the triage store. The app checks these files and the watched repository list every two seconds and reloads any that changed outside it, for example through `ghclient` (`docs/cli.md`).
 
 Repository API calls resolve their credential automatically: an exact owner scope first, then the credential whose accessible repository list contains the repository, then the credential whose accessible list contains the owner, and finally the default credential. Repository suggestions are fetched with every saved credential and merged by full name. Suggestions with review requests for the viewer are listed first.
 

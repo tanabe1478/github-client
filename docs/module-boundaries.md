@@ -3,9 +3,12 @@
 MoonBit module間の依存方向を一方向に固定する。
 
 ```text
-tanabe1478/github-client (desktop composition root)
+tanabe1478/github-client (desktop and command-line composition roots)
   ├── github-client-domain
   ├── github-client-github-api
+  ├── github-client-activity-sync ──> github-client-domain
+  │                                ├─> github-client-github-api
+  │                                └─> github-client-credential-store
   ├── github-client-credential-store ──> github-client-app-paths
   ├── github-client-repository-store ──> github-client-app-paths
   │                                   └─> github-client-domain
@@ -22,6 +25,10 @@ Pureなproduct modelとrelevance rule。filesystem、HTTP、GLFW、Dear ImGuiを
 ### `modules/github_api`
 
 必要なGitHub endpoint、request/response、HTTP transportを所有する。domainやstorageを参照しない。API DTOからdomainへの変換はdesktop composition rootまたは将来のapplication service moduleが担当する。
+
+### `modules/activity_sync`
+
+GitHub activityの取得手順（token選択、並列取得、失敗の記録）とAPI DTOからdomainの`ActivityItem`への変換を所有する。desktopとCLIが共有する。domain、GitHub API、credential storeのlogin labelのみを参照し、他のstorageとUIを参照しない。
 
 ### `modules/app_paths`
 
@@ -41,7 +48,7 @@ activity URLごとの既読時点をfilesystemへ保存する。`app_paths`とdo
 
 ### Root module
 
-`cmd/github_client`がcomposition rootとしてmoduleを組み合わせる。domain rule、HTTP、storageの実装を持ち込まない。
+`cmd/github_client`（desktop）と`cmd/ghclient`（CLI）がcomposition rootとしてmoduleを組み合わせる。domain rule、HTTP、storageの実装を持ち込まない。
 
 ## Prohibited dependencies
 
@@ -50,6 +57,7 @@ activity URLごとの既読時点をfilesystemへ保存する。`app_paths`とdo
 - credential store → domain / repository store / GitHub API / desktop UI
 - repository store → credential store / read state store / GitHub API / desktop UI
 - read state store → credential store / repository store / GitHub API / desktop UI
+- activity sync → storage（credential storeのlogin label以外） / desktop UI
 - app paths → 他のproject module
 - module同士の循環参照
 - C++ Dear ImGui bridge内へのproduct rule実装

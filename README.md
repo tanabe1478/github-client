@@ -41,9 +41,23 @@ Kaguraはゲームエンジンなので採用しません。特定作者に寄�
 - `modules/credential_store`: DPAPI/KeychainによるPAT暗号化保存（`default`とowner/organization scopeの複数トークンに対応）
 - `modules/repository_store`: 登録repositoryのfilesystem persistence
 - `modules/read_state_store`: activityの未読・既読状態のfilesystem persistence
+- `modules/activity_sync`: GitHub activityの取得（並列取得、token選択）とdomain itemへの変換。desktopとCLIで共有
 - `cmd/github_client`: desktop composition root
+- `cmd/ghclient`: command-line client
 
 module間の循環参照は禁止し、依存方向は[Module boundaries](docs/module-boundaries.md)で固定します。
+
+## Command-line client
+
+`ghclient`はwindowを開かずにappと同じtokenとdataを使い、一覧の取得（JSON出力）とDone / Save / Mute / Watchの変更を行います。scriptやAI agentからの自動化向けです。起動中のappは変更を約2秒で読み直します。
+
+```sh
+./scripts/macos/install-cli.sh
+ghclient inbox --kind pr --json
+ghclient done https://github.com/owner/repo/pull/123
+```
+
+commandとJSONの形式は[`docs/cli.md`](docs/cli.md)を参照してください。
 
 ## Windows bootstrap
 

@@ -3,6 +3,7 @@ name = "tanabe1478/github-client"
 version = "0.1.0"
 
 import {
+  "tanabe1478/github-client-activity-sync@0.1.0",
   "tanabe1478/github-client-app-paths@0.1.0",
   "tanabe1478/github-client-credential-store@0.1.0",
   "tanabe1478/github-client-domain@0.1.0",

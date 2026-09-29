@@ -165,3 +165,45 @@ pub async fn list_open_pull_requests(
     Err(error) => Err(error)
   }
 }
+
+///|
+/// Decodes one item from the issues endpoint, which also returns pull
+/// requests. The endpoint does not report draft state.
+pub fn decode_activity(
+  json : Json,
+  repository : String,
+) -> Result[ActivitySummary, String] {
+  try {
+    let item : IssueWire = @json.from_json(json)
+    Ok({
+      repository,
+      number: item.number,
+      title: item.title,
+      html_url: item.html_url,
+      author: item.user.login,
+      updated_at: item.updated_at,
+      kind: if item.pull_request is Some(_) {
+        PullRequest
+      } else {
+        Issue
+      },
+      draft: false,
+    })
+  } catch {
+    _ => Err("GitHub issue response could not be decoded")
+  }
+}
+
+///|
+/// One issue or pull request by number.
+pub async fn get_activity(
+  token : String,
+  owner : String,
+  name : String,
+  number : Int,
+) -> Result[ActivitySummary, String] {
+  match get_json(token, repository_issue_path(owner, name, number)) {
+    Ok(json) => decode_activity(json, "\{owner}/\{name}")
+    Err(error) => Err(error)
+  }
+}

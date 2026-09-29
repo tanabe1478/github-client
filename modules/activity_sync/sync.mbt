@@ -15,7 +15,7 @@ fn ascii_lower(value : String) -> String {
 /// Picks the token for a repository: an exact owner scope, then the token
 /// whose accessible list holds the repository, then one that holds the
 /// owner, then the default token.
-fn resolve_token(
+pub fn resolve_token(
   tokens : Map[String, String],
   repo_scopes : Map[String, String],
   owner_scopes : Map[String, String],
@@ -38,7 +38,7 @@ fn resolve_token(
 }
 
 ///|
-fn append_unique_activities(
+pub fn append_unique_activities(
   dst : Array[@github_api.ActivitySummary],
   items : Array[@github_api.ActivitySummary],
 ) -> Unit {
@@ -50,7 +50,7 @@ fn append_unique_activities(
 }
 
 ///|
-fn replace_activities(
+pub fn replace_activities(
   dst : Array[@github_api.ActivitySummary],
   src : Array[@github_api.ActivitySummary],
 ) -> Unit {
@@ -59,7 +59,10 @@ fn replace_activities(
 }
 
 ///|
-fn replace_scopes(dst : Map[String, String], src : Map[String, String]) -> Unit {
+pub fn replace_scopes(
+  dst : Map[String, String],
+  src : Map[String, String],
+) -> Unit {
   dst.clear()
   for key, value in src {
     dst.set(key, value)
@@ -67,7 +70,7 @@ fn replace_scopes(dst : Map[String, String], src : Map[String, String]) -> Unit 
 }
 
 ///|
-fn without_repository(
+pub fn without_repository(
   activities : Array[@github_api.ActivitySummary],
   repository : String,
 ) -> Array[@github_api.ActivitySummary] {
@@ -76,7 +79,7 @@ fn without_repository(
 
 ///|
 /// Scopes in a stable order with the default token first.
-fn ordered_scopes(tokens : Map[String, String]) -> Array[String] {
+pub fn ordered_scopes(tokens : Map[String, String]) -> Array[String] {
   let scopes : Array[String] = []
   for scope, _ in tokens {
     if scope != "default" {
@@ -93,7 +96,7 @@ fn ordered_scopes(tokens : Map[String, String]) -> Array[String] {
 ///|
 /// Loads repository suggestions for every token. Failures are recorded per
 /// scope in `failures`.
-async fn fetch_repository_suggestions(
+pub async fn fetch_repository_suggestions(
   tokens : Map[String, String],
   repo_scopes : Map[String, String],
   owner_scopes : Map[String, String],
@@ -120,7 +123,7 @@ async fn fetch_repository_suggestions(
     guard results[index] is Some(result) else { continue }
     match result {
       Ok(repositories) => {
-        println(
+        @github_api.log(
           "github-repositories: scope=\{scope} suggestions=\{repositories.length()}",
         )
         for repository in repositories {
@@ -146,7 +149,7 @@ async fn fetch_repository_suggestions(
       }
       Err(error) => {
         failures.set(scope, error)
-        println("github-repositories: scope=\{scope} \{error}")
+        @github_api.log("github-repositories: scope=\{scope} \{error}")
       }
     }
   }
@@ -154,7 +157,7 @@ async fn fetch_repository_suggestions(
 
 ///|
 /// Personal activity for one token, merged into the four lists.
-async fn fetch_personal_activity(
+pub async fn fetch_personal_activity(
   token : String,
   login : String,
   review_requests : Array[@github_api.ActivitySummary],
@@ -182,7 +185,7 @@ async fn fetch_personal_activity(
       Err(error) => errors.push("\{label}: \{error}")
     }
   }
-  println(
+  @github_api.log(
     "github-personal-activity: review-requests=\{review_requests.length()} assignments=\{assignments.length()} mentions=\{mentions.length()} subscriptions=\{subscriptions.length()}",
   )
   if errors.is_empty() {
@@ -196,7 +199,7 @@ async fn fetch_personal_activity(
 /// Personal activity across every token. `on_start` and `on_done` run around
 /// each token so the caller can report progress; failures are recorded per
 /// scope.
-async fn refresh_personal_activity(
+pub async fn refresh_personal_activity(
   tokens : Map[String, String],
   review_requests : Array[@github_api.ActivitySummary],
   assignments : Array[@github_api.ActivitySummary],
@@ -251,14 +254,14 @@ async fn fetch_scope_activity(
     ) {
     Some(error) => {
       failures.set(scope, error)
-      println("github-personal-activity: scope=\{scope} \{error}")
+      @github_api.log("github-personal-activity: scope=\{scope} \{error}")
     }
     None => ()
   }
 }
 
 ///|
-async fn fetch_repository_activity(
+pub async fn fetch_repository_activity(
   tokens : Map[String, String],
   repo_scopes : Map[String, String],
   owner_scopes : Map[String, String],
@@ -299,7 +302,7 @@ async fn fetch_repository_activity(
     }
     Err(error) => errors.push(error)
   }
-  println(
+  @github_api.log(
     "github-activity: \{repository.key()} pull-requests=\{pull_request_count} issues=\{issue_count}",
   )
   if errors.is_empty() {
@@ -308,4 +311,100 @@ async fn fetch_repository_activity(
     // Pull requests and issues usually fail for the same reason.
     Some(errors[0])
   }
+}
+
+///|
+/// Open pull requests and issues for every repository, fetched
+/// concurrently. Failures are recorded per repository.
+pub async fn fetch_watched_activity(
+  tokens : Map[String, String],
+  repo_scopes : Map[String, String],
+  owner_scopes : Map[String, String],
+  repositories : Array[@domain.RepositoryRef],
+  pull_requests : Array[@github_api.ActivitySummary],
+  issues : Array[@github_api.ActivitySummary],
+  failures : Map[String, String],
+  on_done : () -> Unit,
+) -> Unit {
+  let tasks = repositories.map(repository => {
+    async fn() {
+      match
+        fetch_repository_activity(
+          tokens, repo_scopes, owner_scopes, repository, pull_requests, issues,
+        ) {
+        Some(error) => {
+          failures.set(repository.key(), error)
+          @github_api.log("github-activity: \{repository.key()}: \{error}")
+        }
+        None => ()
+      }
+      on_done()
+    }
+  })
+  ignore(@async.all(tasks, max_concurrent=6))
+}
+
+///|
+/// Splits "https://github.com/owner/name/pull/12" or ".../issues/12" into
+/// the repository and number.
+pub fn parse_activity_url(
+  url : String,
+) -> Result[(@domain.RepositoryRef, Int), String] {
+  let prefix = "https://github.com/"
+  guard url.has_prefix(prefix) else {
+    return Err(
+      "expected a https://github.com/owner/repo/pull/N or /issues/N URL",
+    )
+  }
+  let parts = url[prefix.length():]
+    .to_owned()
+    .split("/")
+    .to_array()
+    .map(part => part.to_owned())
+  guard parts.length() >= 4 &&
+    parts[0] != "" &&
+    parts[1] != "" &&
+    (parts[2] == "pull" || parts[2] == "issues") else {
+    return Err(
+      "expected a https://github.com/owner/repo/pull/N or /issues/N URL",
+    )
+  }
+  let digits = parts[3].split("#").to_array()[0].to_owned()
+  let mut number = 0
+  for character in digits {
+    guard character >= '0' && character <= '9' else {
+      return Err("the URL does not end with an issue or pull request number")
+    }
+    number = number * 10 + (character.to_int() - '0'.to_int())
+  }
+  guard number > 0 else {
+    return Err("the URL does not end with an issue or pull request number")
+  }
+  Ok((@domain.RepositoryRef::new(parts[0], parts[1]), number))
+}
+
+///|
+/// The current state of one issue or pull request, using the token that
+/// `resolve_token` picks for its repository.
+pub async fn fetch_activity(
+  tokens : Map[String, String],
+  repo_scopes : Map[String, String],
+  owner_scopes : Map[String, String],
+  url : String,
+) -> Result[@github_api.ActivitySummary, String] {
+  let (repository, number) = match parse_activity_url(url) {
+    Ok(parsed) => parsed
+    Err(error) => return Err(error)
+  }
+  guard resolve_token(
+      tokens,
+      repo_scopes,
+      owner_scopes,
+      repository.owner(),
+      repository.name(),
+    )
+    is Some(token) else {
+    return Err("no saved token can access \{repository.owner()}")
+  }
+  @github_api.get_activity(token, repository.owner(), repository.name(), number)
 }

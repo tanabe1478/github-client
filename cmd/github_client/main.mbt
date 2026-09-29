@@ -11,6 +11,8 @@ priv enum FetchJob {
   VerifyToken(String, String)
   Credentials(String)
   Auto
+  /// Watched repositories changed outside the app, for example by ghclient.
+  External
 }
 
 ///|
@@ -25,6 +27,7 @@ fn FetchJob::title(self : FetchJob) -> String {
     VerifyToken(_, _) => "Verifying token"
     Credentials(_) => "Reloading activity"
     Auto => "Auto refreshing"
+    External => "Updating watched repositories"
   }
 }
 
@@ -32,7 +35,7 @@ fn FetchJob::title(self : FetchJob) -> String {
 /// Fetches the user started block the window with the loading dialog.
 /// Background work and token checks (shown in their own dialog) do not.
 fn FetchJob::is_modal(self : FetchJob) -> Bool {
-  !(self is (Auto | RemovedRepository | VerifyToken(_, _)))
+  !(self is (Auto | External | RemovedRepository | VerifyToken(_, _)))
 }
 
 ///|
@@ -44,7 +47,7 @@ fn FetchJob::is_cancellable(self : FetchJob) -> Bool {
 ///|
 fn FetchJob::success_message(self : FetchJob) -> String? {
   match self {
-    Startup | RemovedRepository | VerifyToken(_, _) | Auto => None
+    Startup | RemovedRepository | VerifyToken(_, _) | Auto | External => None
     Watched => Some("Watched activity refreshed.")
     Personal => Some("For you refreshed.")
     Everything => Some("Activity refreshed.")
@@ -342,11 +345,35 @@ async fn main {
     }
   }
 
+  // ghclient and other tools edit the same files. The app remembers what
+  // it last read or wrote and reloads a file whose contents changed.
+  let read_state_path = @app_paths.data_file("read-state.txt").unwrap_or("")
+  let triage_path = @app_paths.data_file("triage.txt").unwrap_or("")
+  let repositories_path = @app_paths.data_file("repositories.txt").unwrap_or("")
+  fn read_text(path : String) -> String {
+    if path == "" || !@fs.path_exists(path) {
+      return ""
+    }
+    @fs.read_file_to_string(path, encoding="utf8") catch {
+      _ => ""
+    }
+  }
+
+  let mut known_read_state = read_text(read_state_path)
+  let mut known_triage = read_text(triage_path)
+  let mut known_repositories = read_text(repositories_path)
+  fn remember_files() -> Unit {
+    known_read_state = read_text(read_state_path)
+    known_triage = read_text(triage_path)
+    known_repositories = read_text(repositories_path)
+  }
+
   fn save_read_markers() -> Unit {
     match @read_state_store.save_default(read_markers) {
       Ok(_) => ()
       Err(error) => println("read-state-store: save failed: \{error}")
     }
+    remember_files()
   }
 
   fn save_triage() -> Unit {
@@ -354,6 +381,7 @@ async fn main {
       Ok(_) => ()
       Err(error) => println("triage-store: save failed: \{error}")
     }
+    remember_files()
   }
 
   // Rows that are new or changed since they were last on screen get a
@@ -381,26 +409,17 @@ async fn main {
     next_issues : Array[@github_api.ActivitySummary],
   ) -> Unit {
     repository_failures.clear()
-    let tasks = model
-      .repositories()
-      .map(repository => {
-        async fn() {
-          match
-            fetch_repository_activity(
-              saved_tokens, repo_scopes, owner_scopes, repository, next_pull_requests,
-              next_issues,
-            ) {
-            Some(error) => {
-              repository_failures.set(repository.key(), error)
-              println("github-activity: \{repository.key()}: \{error}")
-            }
-            None => ()
-          }
-          loading_done += 1
-        }
-      })
     loading_detail = "Watched repositories"
-    ignore(@async.all(tasks, max_concurrent=6))
+    @activity_sync.fetch_watched_activity(
+      saved_tokens,
+      repo_scopes,
+      owner_scopes,
+      model.repositories(),
+      next_pull_requests,
+      next_issues,
+      repository_failures,
+      () => loading_done += 1,
+    )
   }
 
   fn commit_watched(
@@ -414,13 +433,13 @@ async fn main {
     mark_fresh([next_pull_requests, next_issues])
     // A repository removed while the fetch was running stays removed.
     let watched = model.repositories()
-    replace_activities(
+    @activity_sync.replace_activities(
       pull_requests,
       next_pull_requests.filter(activity => {
         @domain.repository_is_watched(watched, activity.repository())
       }),
     )
-    replace_activities(
+    @activity_sync.replace_activities(
       issues,
       next_issues.filter(activity => {
         @domain.repository_is_watched(watched, activity.repository())
@@ -433,7 +452,7 @@ async fn main {
   async fn fetch_personal(
     next : Array[Array[@github_api.ActivitySummary]],
   ) -> Unit {
-    refresh_personal_activity(
+    @activity_sync.refresh_personal_activity(
       saved_tokens,
       next[0],
       next[1],
@@ -453,10 +472,10 @@ async fn main {
       return
     }
     mark_fresh(next)
-    replace_activities(review_requests, next[0])
-    replace_activities(assignments, next[1])
-    replace_activities(mentions, next[2])
-    replace_activities(subscriptions, next[3])
+    @activity_sync.replace_activities(review_requests, next[0])
+    @activity_sync.replace_activities(assignments, next[1])
+    @activity_sync.replace_activities(mentions, next[2])
+    @activity_sync.replace_activities(subscriptions, next[3])
     last_synced = Some(imgui_now())
   }
 
@@ -477,7 +496,7 @@ async fn main {
     let next_suggestions = []
     let next_repo_scopes : Map[String, String] = Map([])
     let next_owner_scopes : Map[String, String] = Map([])
-    fetch_repository_suggestions(
+    @activity_sync.fetch_repository_suggestions(
       saved_tokens, next_repo_scopes, next_owner_scopes, next_suggestions, scope_failures,
     )
     if generation != active_generation {
@@ -485,8 +504,8 @@ async fn main {
     }
     suggested_repositories.clear()
     suggested_repositories.append(next_suggestions)
-    replace_scopes(repo_scopes, next_repo_scopes)
-    replace_scopes(owner_scopes, next_owner_scopes)
+    @activity_sync.replace_scopes(repo_scopes, next_repo_scopes)
+    @activity_sync.replace_scopes(owner_scopes, next_owner_scopes)
     loading_done += 1
     load_watched(generation)
   }
@@ -527,6 +546,7 @@ async fn main {
           Ok(_) => println("ui-action: repository.register")
           Err(error) => println("repository-store: save failed: \{error}")
         }
+        remember_files()
         dismissed_banners.set("watch:\{repository.key()}", true)
         if model.repositories().length() == previous_count {
           notify("\{repository.key()} is already watched.", None)
@@ -609,13 +629,17 @@ async fn main {
         load_everything(generation)
       }
       RemovedRepository => load_personal(generation)
+      External => {
+        loading_total = saved_tokens.length() + model.repositories().length()
+        load_everything(generation)
+      }
       AddedRepository(repository) => {
         loading_total = 1 + saved_tokens.length()
         loading_detail = repository.key()
         let next_pull_requests = []
         let next_issues = []
         match
-          fetch_repository_activity(
+          @activity_sync.fetch_repository_activity(
             saved_tokens, repo_scopes, owner_scopes, repository, next_pull_requests,
             next_issues,
           ) {
@@ -627,14 +651,14 @@ async fn main {
           return
         }
         if @domain.repository_is_watched(model.repositories(), repository.key()) {
-          replace_activities(
+          @activity_sync.replace_activities(
             pull_requests,
-            without_repository(pull_requests, repository.key()),
+            @activity_sync.without_repository(pull_requests, repository.key()),
           )
           pull_requests.append(next_pull_requests)
-          replace_activities(
+          @activity_sync.replace_activities(
             issues,
-            without_repository(issues, repository.key()),
+            @activity_sync.without_repository(issues, repository.key()),
           )
           issues.append(next_issues)
         }
@@ -771,6 +795,7 @@ async fn main {
 
   let mut last_auto_refresh = imgui_now()
   let mut last_control_poll = imgui_now()
+  let mut last_file_poll = imgui_now()
   @async.with_task_group(group => {
     while !@glfw.window_should_close(window) {
       @glfw.poll_events()
@@ -787,6 +812,81 @@ async fn main {
         ] {
         for activity in activities {
           seen_revisions.set(activity.html_url(), activity.updated_at())
+        }
+      }
+      if now - last_file_poll >= 2.0 {
+        last_file_poll = now
+        let read_state = read_text(read_state_path)
+        if read_state != known_read_state {
+          known_read_state = read_state
+          match @read_state_store.decode(read_state) {
+            Ok(markers) => {
+              read_markers = markers
+              println("store: read state changed outside the app")
+            }
+            Err(error) => println("store: read state reload failed: \{error}")
+          }
+        }
+        let triage = read_text(triage_path)
+        if triage != known_triage {
+          known_triage = triage
+          match @triage_store.decode(triage) {
+            Ok(state) => {
+              saved_urls.clear()
+              muted_urls.clear()
+              for url in state.saved {
+                saved_urls.set(url, true)
+              }
+              for url in state.muted {
+                muted_urls.set(url, true)
+              }
+              println("store: triage changed outside the app")
+            }
+            Err(error) => println("store: triage reload failed: \{error}")
+          }
+        }
+        let repositories = read_text(repositories_path)
+        if repositories != known_repositories {
+          known_repositories = repositories
+          match @repository_store.decode(repositories) {
+            Ok(next) => {
+              let previous = model.repositories()
+              for repository in previous {
+                if !next.any(entry => entry.key() == repository.key()) {
+                  model = @domain.update(
+                    model,
+                    @domain.Msg::RemoveRepository(repository.key()),
+                  )
+                  @activity_sync.replace_activities(
+                    pull_requests,
+                    @activity_sync.without_repository(
+                      pull_requests,
+                      repository.key(),
+                    ),
+                  )
+                  @activity_sync.replace_activities(
+                    issues,
+                    @activity_sync.without_repository(issues, repository.key()),
+                  )
+                }
+              }
+              let mut added = false
+              for repository in next {
+                if !previous.any(entry => entry.key() == repository.key()) {
+                  model = @domain.update(
+                    model,
+                    @domain.Msg::RegisterRepository(repository),
+                  )
+                  added = true
+                }
+              }
+              if added && !saved_tokens.is_empty() {
+                pending_jobs.push(External)
+              }
+              println("store: watched repositories changed outside the app")
+            }
+            Err(error) => println("store: repositories reload failed: \{error}")
+          }
         }
       }
       if running_job is None && !pending_jobs.is_empty() {
@@ -897,8 +997,11 @@ async fn main {
       let page = model.page()
       let filter = imgui_view_filter()
       let watched = model.repositories()
-      let inbox_items = watched_items([pull_requests, issues], muted_urls)
-      let for_you_items = personal_items(
+      let inbox_items = @activity_sync.watched_items(
+        [pull_requests, issues],
+        muted_urls,
+      )
+      let for_you_items = @activity_sync.personal_items(
         review_requests,
         assignments,
         mentions,
@@ -939,7 +1042,7 @@ async fn main {
         Saved =>
           (
             @domain.build_activity_rows(
-              saved_items(
+              @activity_sync.saved_items(
                 [
                   pull_requests, issues, review_requests, assignments, mentions,
                   subscriptions,
@@ -962,8 +1065,10 @@ async fn main {
           fresh_since.remove(key)
         }
       }
-      let inbox_unread = unread_count(inbox_items, read_markers)
-      let for_you_unread = unread_count(for_you_items, read_markers)
+      let inbox_unread = @activity_sync.unread_count(inbox_items, read_markers)
+      let for_you_unread = @activity_sync.unread_count(
+        for_you_items, read_markers,
+      )
       let header = match page {
         Inbox | PullRequests | Issues => {
           let noun = if watched.length() == 1 {
@@ -1115,13 +1220,20 @@ async fn main {
           match @domain.RepositoryRef::parse(key) {
             Ok(repository) => {
               model = @domain.update(model, @domain.Msg::RemoveRepository(key))
-              replace_activities(
+              @activity_sync.replace_activities(
                 pull_requests,
-                without_repository(pull_requests, key),
+                @activity_sync.without_repository(pull_requests, key),
               )
-              replace_activities(issues, without_repository(issues, key))
+              @activity_sync.replace_activities(
+                issues,
+                @activity_sync.without_repository(issues, key),
+              )
               repository_failures.remove(key)
-              match @repository_store.save_default(model.repositories()) {
+              let saved_repositories = @repository_store.save_default(
+                model.repositories(),
+              )
+              remember_files()
+              match saved_repositories {
                 Ok(_) => {
                   notify("Unwatched \{key}.", Some(Rewatch(repository)))
                   println("ui-action: repository.remove")

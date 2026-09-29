@@ -32,6 +32,15 @@ pub fn repository_issues_path(owner : String, name : String) -> String {
 }
 
 ///|
+pub fn repository_issue_path(
+  owner : String,
+  name : String,
+  number : Int,
+) -> String {
+  "/repos/\{owner}/\{name}/issues/\{number}"
+}
+
+///|
 pub fn repository_pulls_path(owner : String, name : String) -> String {
   "/repos/\{owner}/\{name}/pulls?state=open&sort=updated&direction=desc&per_page=50"
 }

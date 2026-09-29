@@ -23,7 +23,7 @@ async fn get_json(token : String, path : String) -> Result[Json, String] {
       headers=request_headers(token),
     )
     let fetched = @async.now()
-    defer println(
+    defer log(
       "http: status=\{response.code} fetch_ms=\{fetched - started} path=\{path}",
     )
     if response.code == 401 {
@@ -48,7 +48,7 @@ async fn get_json(token : String, path : String) -> Result[Json, String] {
       return Err("GitHub request failed with status \{response.code}")
     }
     let json = body.json()
-    println("http: parse_ms=\{@async.now() - fetched} path=\{path}")
+    log("http: parse_ms=\{@async.now() - fetched} path=\{path}")
     Ok(json)
   } catch {
     _ => Err("GitHub request failed before a response was received")
@@ -99,4 +99,20 @@ pub fn classify_failure(message : String) -> ApiFailure {
     return Network
   }
   Other
+}
+
+///|
+let logger : Ref[(String) -> Unit] = Ref(println)
+
+///|
+/// Replaces where diagnostic lines from this package and its callers go.
+/// The desktop app keeps the default (stdout); the command-line client
+/// silences them so stdout carries only its own output.
+pub fn set_logger(write : (String) -> Unit) -> Unit {
+  logger.val = write
+}
+
+///|
+pub fn log(message : String) -> Unit {
+  (logger.val)(message)
 }

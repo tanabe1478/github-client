@@ -85,6 +85,9 @@ process.stdout.write(
       GITHUB_CLIENT_GLFW_CFLAGS: config.cflags,
       GITHUB_CLIENT_IMGUI_CXXFLAGS: `-std=c++17 -I${imguiInclude}`,
       GITHUB_CLIENT_GLFW_LIBS: `-L${localNativeLibs} ${config.libs}`,
+      // The command-line client needs only the OS credential store.
+      GITHUB_CLIENT_CLI_LIBS:
+        process.platform === "darwin" ? "-framework Security -framework CoreFoundation" : "",
     },
   })}\n`,
 );
