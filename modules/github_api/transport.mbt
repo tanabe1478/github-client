@@ -17,14 +17,28 @@ fn request_headers(token : String) -> @http.Headers {
 ///|
 async fn get_json(token : String, path : String) -> Result[Json, String] {
   try {
+    let started = @async.now()
     let (response, body) = @http.get(
       "https://api.github.com\{path}",
       headers=request_headers(token),
     )
+    let fetched = @async.now()
+    defer println(
+      "http: status=\{response.code} fetch_ms=\{fetched - started} path=\{path}",
+    )
     if response.code == 401 {
       return Err("GitHub rejected the saved token")
     }
-    if response.code == 403 {
+    if response.code == 403 || response.code == 429 {
+      let remaining = response.headers.get(
+        @http.CaseInsensitiveString("X-RateLimit-Remaining"),
+      )
+      let reset = response.headers.get(
+        @http.CaseInsensitiveString("X-RateLimit-Reset"),
+      )
+      if remaining == Some("0") && reset is Some(epoch) {
+        return Err("\{rate_limit_message_prefix}\{epoch})")
+      }
       return Err("GitHub denied the request or the API rate limit was reached")
     }
     if response.code == 404 {
@@ -33,8 +47,56 @@ async fn get_json(token : String, path : String) -> Result[Json, String] {
     if response.code < 200 || response.code >= 300 {
       return Err("GitHub request failed with status \{response.code}")
     }
-    Ok(body.json())
+    let json = body.json()
+    println("http: parse_ms=\{@async.now() - fetched} path=\{path}")
+    Ok(json)
   } catch {
     _ => Err("GitHub request failed before a response was received")
   }
+}
+
+///|
+let rate_limit_message_prefix = "GitHub API rate limit was reached (resets at "
+
+///|
+/// The kind of failure behind an error message from this package.
+pub(all) enum ApiFailure {
+  Unauthorized
+  /// Seconds since the Unix epoch at which the limit resets.
+  RateLimited(Int64)
+  Forbidden
+  NotFound
+  Network
+  Other
+} derive(Eq, Debug)
+
+///|
+/// Classifies an error message returned by this package, including messages
+/// that callers prefixed with context.
+pub fn classify_failure(message : String) -> ApiFailure {
+  if message.contains("GitHub rejected the saved token") {
+    return Unauthorized
+  }
+  if message.find(rate_limit_message_prefix) is Some(start) {
+    let rest = message[start + rate_limit_message_prefix.length():]
+    let mut epoch = 0L
+    for character in rest {
+      if character >= '0' && character <= '9' {
+        epoch = epoch * 10L + (character.to_int() - '0'.to_int()).to_int64()
+      } else {
+        break
+      }
+    }
+    return RateLimited(epoch)
+  }
+  if message.contains("GitHub denied the request") {
+    return Forbidden
+  }
+  if message.contains("not found or is not accessible") {
+    return NotFound
+  }
+  if message.contains("failed before a response was received") {
+    return Network
+  }
+  Other
 }

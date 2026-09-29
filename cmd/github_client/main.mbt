@@ -1,297 +1,72 @@
 ///|
-fn safe_row_text(value : String) -> String {
-  value
-  .replace_all(old="\r", new=" ")
-  .replace_all(old="\n", new=" ")
-  .replace_all(old="\t", new=" ")
+/// GitHub fetches run as background tasks so the window keeps rendering.
+/// Jobs run one at a time in request order.
+priv enum FetchJob {
+  Startup
+  Watched
+  Personal
+  Everything
+  AddedRepository(@domain.RepositoryRef)
+  RemovedRepository
+  VerifyToken(String, String)
+  Credentials(String)
+  Auto
 }
 
 ///|
-fn repository_rows(repositories : Array[@domain.RepositoryRef]) -> String {
-  repositories.map(repository => repository.key()).join("\n")
-}
-
-///|
-fn suggested_repository_rows(
-  repositories : Array[@github_api.RepositorySummary],
-) -> String {
-  repositories
-  .map(repository => {
-    let visibility = if repository.is_private() { "Private" } else { "Public" }
-    let archived = if repository.is_archived() { " · Archived" } else { "" }
-    "\{repository.full_name()}  · \{visibility}\{archived}\t\{repository.full_name()}"
-  })
-  .join("\n")
-}
-
-///|
-fn ascii_lower(value : String) -> String {
-  let lowered = StringBuilder()
-  for character in value {
-    if character >= 'A' && character <= 'Z' {
-      lowered.write_char((character.to_int() + 32).unsafe_to_char())
-    } else {
-      lowered.write_char(character)
-    }
-  }
-  lowered.to_string()
-}
-
-///|
-fn resolve_token(
-  tokens : Map[String, String],
-  repo_scopes : Map[String, String],
-  owner_scopes : Map[String, String],
-  owner : String,
-  name : String,
-) -> String? {
-  let owner_key = ascii_lower(owner)
-  match tokens.get(owner_key) {
-    Some(token) => Some(token)
-    None =>
-      match repo_scopes.get(ascii_lower("\{owner}/\{name}")) {
-        Some(scope) => tokens.get(scope)
-        None =>
-          match owner_scopes.get(owner_key) {
-            Some(scope) => tokens.get(scope)
-            None => tokens.get("default")
-          }
-      }
+fn FetchJob::title(self : FetchJob) -> String {
+  match self {
+    Startup => "Loading your activity"
+    Watched => "Refreshing watched activity"
+    Personal => "Refreshing For you"
+    Everything => "Refreshing activity"
+    AddedRepository(repository) => "Loading \{repository.key()}"
+    RemovedRepository => "Updating For you"
+    VerifyToken(_, _) => "Verifying token"
+    Credentials(_) => "Reloading activity"
+    Auto => "Auto refreshing"
   }
 }
 
 ///|
-fn credentials_text() -> String {
-  @credential_store.list_scopes()
-  .map(scope => {
-    let login = @credential_store.load_login_label(scope).unwrap_or("")
-    "\{scope}\t\{login}"
-  })
-  .join("\n")
+/// Fetches the user started block the window with the loading dialog.
+/// Background work and token checks (shown in their own dialog) do not.
+fn FetchJob::is_modal(self : FetchJob) -> Bool {
+  !(self is (Auto | RemovedRepository | VerifyToken(_, _)))
 }
 
 ///|
-fn activity_row(
-  activity : @github_api.ActivitySummary,
-  label : String,
-  read_markers : Array[@domain.ReadMarker],
-  saved : Map[String, Bool],
-) -> String {
-  let read_state = if @domain.activity_is_read(
-      read_markers,
-      activity.html_url(),
-      activity.updated_at(),
-    ) {
-    "read"
-  } else {
-    "unread"
-  }
-  let saved_state = if saved.contains(activity.html_url()) {
-    "saved"
-  } else {
-    ""
-  }
-  "\{safe_row_text(label)}\t\{activity.html_url()}\t\{read_state}\t\{activity.updated_at()}\t\{saved_state}"
+fn FetchJob::is_cancellable(self : FetchJob) -> Bool {
+  self
+  is (Watched | Personal | Everything | AddedRepository(_) | Credentials(_))
 }
 
 ///|
-fn activity_label(activity : @github_api.ActivitySummary) -> String {
-  let draft = if activity.is_draft() { " [draft]" } else { "" }
-  "\{activity.repository()} #\{activity.number()}\{draft}  \{activity.title()}  · @\{activity.author()}"
-}
-
-///|
-fn activity_rows(
-  activities : Array[@github_api.ActivitySummary],
-  read_markers : Array[@domain.ReadMarker],
-  saved : Map[String, Bool],
-  muted : Map[String, Bool],
-) -> String {
-  activities
-  .filter(activity => !muted.contains(activity.html_url()))
-  .map(activity => {
-    activity_row(activity, activity_label(activity), read_markers, saved)
-  })
-  .join("\n")
-}
-
-///|
-fn saved_activity_rows(
-  read_markers : Array[@domain.ReadMarker],
-  saved : Map[String, Bool],
-  muted : Map[String, Bool],
-  activity_sets : Array[Array[@github_api.ActivitySummary]],
-) -> String {
-  let seen : Map[String, Bool] = Map([])
-  let rows : Array[String] = []
-  for activities in activity_sets {
-    for activity in activities {
-      let url = activity.html_url()
-      if saved.contains(url) && !muted.contains(url) && !seen.contains(url) {
-        seen.set(url, true)
-        rows.push(
-          activity_row(activity, activity_label(activity), read_markers, saved),
-        )
-      }
-    }
-  }
-  rows.join("\n")
-}
-
-///|
-struct PersonalRow {
-  activity : @github_api.ActivitySummary
-  reasons : Array[String]
-}
-
-///|
-fn merge_personal_rows(
-  rows : Array[PersonalRow],
-  indices : Map[String, Int],
-  activities : Array[@github_api.ActivitySummary],
-  reason : String,
-  watched_repositories : Array[@domain.RepositoryRef],
-  muted : Map[String, Bool],
-) -> Unit {
-  for activity in activities {
-    if muted.contains(activity.html_url()) ||
-      !@domain.repository_is_watched(
-        watched_repositories,
-        activity.repository(),
-      ) {
-      continue
-    }
-    match indices.get(activity.html_url()) {
-      Some(index) =>
-        if !rows[index].reasons.contains(reason) {
-          rows[index].reasons.push(reason)
-        }
-      None => {
-        indices.set(activity.html_url(), rows.length())
-        rows.push({ activity, reasons: [reason], })
-      }
-    }
+fn FetchJob::success_message(self : FetchJob) -> String? {
+  match self {
+    Startup | RemovedRepository | VerifyToken(_, _) | Auto => None
+    Watched => Some("Watched activity refreshed.")
+    Personal => Some("For you refreshed.")
+    Everything => Some("Activity refreshed.")
+    AddedRepository(repository) => Some("Watching \{repository.key()}.")
+    Credentials(message) => if message == "" { None } else { Some(message) }
   }
 }
 
 ///|
-fn personal_activity_rows(
-  review_requests : Array[@github_api.ActivitySummary],
-  assignments : Array[@github_api.ActivitySummary],
-  mentions : Array[@github_api.ActivitySummary],
-  subscriptions : Array[@github_api.ActivitySummary],
-  watched_repositories : Array[@domain.RepositoryRef],
-  read_markers : Array[@domain.ReadMarker],
-  saved : Map[String, Bool],
-  muted : Map[String, Bool],
-) -> String {
-  let rows : Array[PersonalRow] = []
-  let indices : Map[String, Int] = Map([])
-  merge_personal_rows(
-    rows, indices, review_requests, "Review requested", watched_repositories, muted,
-  )
-  merge_personal_rows(
-    rows, indices, assignments, "Assigned", watched_repositories, muted,
-  )
-  merge_personal_rows(
-    rows, indices, mentions, "Mentioned", watched_repositories, muted,
-  )
-  merge_personal_rows(
-    rows, indices, subscriptions, "Subscribed", watched_repositories, muted,
-  )
-  rows
-  .map(row => {
-    let activity = row.activity
-    let label = "[\{row.reasons.join(", ")}] \{activity.repository()} #\{activity.number()}  \{activity.title()}  · @\{activity.author()}"
-    activity_row(activity, label, read_markers, saved)
-  })
-  .join("\n")
+priv enum UndoOp {
+  /// Read markers to put back: URL and its previous read_at, if any.
+  Restore(Array[(String, String?)])
+  Unmute(String)
+  ToggleSave(String)
+  Rewatch(@domain.RepositoryRef)
 }
 
 ///|
-fn append_unique_activities(
-  dst : Array[@github_api.ActivitySummary],
-  items : Array[@github_api.ActivitySummary],
-) -> Unit {
-  for item in items {
-    let mut found = false
-    for existing in dst {
-      if existing.html_url() == item.html_url() {
-        found = true
-        break
-      }
-    }
-    if !found {
-      dst.push(item)
-    }
-  }
-}
+const FETCH_JOB_TIMEOUT_MS : Int = 90_000
 
 ///|
-fn applescript_escape(value : String) -> String {
-  value.replace_all(old="\\", new="\\\\").replace_all(old="\"", new="\\\"")
-}
-
-///|
-async fn post_notification(title : String, body : String) -> Unit {
-  let script = "display notification \"\{applescript_escape(body)}\" with title \"\{applescript_escape(title)}\" sound name \"Glass\""
-  let status = @async_shell.Cmd::Cmd("osascript", ["-e", script]).status()
-  if status != 0 {
-    println("notification: osascript exited with \{status}")
-  }
-}
-
-///|
-fn record_seen_revisions(
-  seen : Map[String, String],
-  activity_sets : Array[Array[@github_api.ActivitySummary]],
-) -> Unit {
-  for activities in activity_sets {
-    for activity in activities {
-      seen.set(activity.html_url(), activity.updated_at())
-    }
-  }
-}
-
-///|
-fn collect_fresh_labels(
-  seen : Map[String, String],
-  watched : Array[@domain.RepositoryRef],
-  muted : Map[String, Bool],
-  activity_sets : Array[Array[@github_api.ActivitySummary]],
-  personal_sets : Array[Array[@github_api.ActivitySummary]],
-) -> Array[String] {
-  let fresh : Array[String] = []
-  let fresh_urls : Map[String, Bool] = Map([])
-  for activities in activity_sets {
-    for activity in activities {
-      let url = activity.html_url()
-      if !muted.contains(url) &&
-        !fresh_urls.contains(url) &&
-        seen.get(url) != Some(activity.updated_at()) {
-        fresh_urls.set(url, true)
-        fresh.push(
-          "\{activity.repository()} #\{activity.number()}  \{activity.title()}  · @\{activity.author()}",
-        )
-      }
-    }
-  }
-  for activities in personal_sets {
-    for activity in activities {
-      let url = activity.html_url()
-      if @domain.repository_is_watched(watched, activity.repository()) &&
-        !muted.contains(url) &&
-        !fresh_urls.contains(url) &&
-        seen.get(url) != Some(activity.updated_at()) {
-        fresh_urls.set(url, true)
-        fresh.push(
-          "\{activity.repository()} #\{activity.number()}  \{activity.title()}  · @\{activity.author()}",
-        )
-      }
-    }
-  }
-  fresh
-}
+const AUTO_REFRESH_SECONDS : Double = 300.0
 
 ///|
 fn persist_triage(
@@ -312,339 +87,104 @@ fn persist_triage(
 }
 
 ///|
-struct ControlCommand {
-  action : Int
-  url : String
-  updated_at : String
-  repository : String
-}
-
-///|
-fn control_command(action : Int) -> ControlCommand {
-  { action, url: "", updated_at: "", repository: "", }
-}
-
-///|
-fn find_activity_updated_at(
+fn previous_read_at(
+  markers : Array[@domain.ReadMarker],
   url : String,
-  activity_sets : Array[Array[@github_api.ActivitySummary]],
-) -> String {
-  for activities in activity_sets {
-    for activity in activities {
-      if activity.html_url() == url {
-        return activity.updated_at()
-      }
+) -> String? {
+  for marker in markers {
+    if marker.url() == url {
+      return Some(marker.read_at())
     }
   }
-  ""
+  None
 }
 
 ///|
-fn poll_control_commands(
-  control_path : String,
-  queue : Array[ControlCommand],
-  activity_sets : Array[Array[@github_api.ActivitySummary]],
+fn applescript_escape(value : String) -> String {
+  value.replace_all(old="\\", new="\\\\").replace_all(old="\"", new="\\\"")
+}
+
+///|
+async fn post_notification(
+  title : String,
+  subtitle : String,
+  body : String,
 ) -> Unit {
-  if !@fs.path_exists(control_path) {
-    return
-  }
-  let source = @fs.read_file_to_string(control_path, encoding="utf8") catch {
-    _ => return
-  }
-  @fs.remove_file(control_path) catch {
-    _ => ()
-  }
-  for
-    raw_line in source.replace_all(old="\r\n", new="\n").split("\n").to_array() {
-    let line = raw_line.trim()
-    if line == "" {
-      continue
+  let script = "display notification \"\{applescript_escape(body)}\" with title \"\{applescript_escape(title)}\" subtitle \"\{applescript_escape(subtitle)}\" sound name \"Glass\""
+  let status = @async_shell.Cmd::Cmd("osascript", ["-e", script]).status() catch {
+    error => {
+      println("notification: osascript failed: \{error}")
+      return
     }
-    let parts = line.split(" ").to_array()
-    match parts[0] {
-      "open" =>
-        if parts.length() > 1 {
-          queue.push({ ..control_command(4), url: parts[1].to_owned(), })
-        }
-      "done" =>
-        if parts.length() > 1 {
-          let url = parts[1].to_owned()
-          let updated_at = find_activity_updated_at(url, activity_sets)
-          if updated_at == "" {
-            println("control: done target not found: \{url}")
-          } else {
-            queue.push({ ..control_command(6), url, updated_at, })
-          }
-        }
-      "save" =>
-        if parts.length() > 1 {
-          queue.push({ ..control_command(22), url: parts[1].to_owned(), })
-        }
-      "unsub" | "unsubscribe" =>
-        if parts.length() > 1 {
-          queue.push({ ..control_command(23), url: parts[1].to_owned(), })
-        }
-      "nav" =>
-        if parts.length() > 1 {
-          let action = match parts[1] {
-            "inbox" => 10
-            "repositories" => 11
-            "pull-requests" => 12
-            "issues" => 13
-            "settings" => 14
-            "for-you" => 15
-            "saved" => 16
-            _ => 0
-          }
-          if action != 0 {
-            queue.push(control_command(action))
-          }
-        }
-      "watch" =>
-        if parts.length() > 1 {
-          queue.push({ ..control_command(2), repository: parts[1].to_owned(), })
-        }
-      "refresh" => queue.push(control_command(20))
-      "refresh-for-you" => queue.push(control_command(21))
-      "show-done" =>
-        github_client_imgui_set_show_done(
-          if parts.length() > 1 && parts[1] == "0" {
-            0
-          } else {
-            1
-          },
-        )
-      "quit" => queue.push(control_command(99))
-      _ => println("control: unknown command \{line}")
-    }
+  }
+  if status != 0 {
+    println("notification: osascript exited with \{status}")
   }
 }
 
 ///|
-async fn notify_fresh_activities(fresh : Array[String]) -> Unit {
+/// Up to three individual notifications, otherwise one summary grouped by
+/// repository. `reason` is empty for watched activity.
+async fn notify_fresh_activities(
+  fresh : Array[(@github_api.ActivitySummary, String)],
+) -> Unit {
   if fresh.is_empty() {
     return
   }
   if fresh.length() <= 3 {
-    for body in fresh {
-      post_notification("GitHub Client", body)
-    }
-  } else {
-    post_notification(
-      "GitHub Client",
-      "\{fresh.length()} new activities in watched repositories",
-    )
-  }
-}
-
-///|
-async fn fetch_personal_activity(
-  token : String,
-  login : String,
-  review_requests : Array[@github_api.ActivitySummary],
-  assignments : Array[@github_api.ActivitySummary],
-  mentions : Array[@github_api.ActivitySummary],
-  subscriptions : Array[@github_api.ActivitySummary],
-) -> String? {
-  let errors : Array[String] = []
-  match @github_api.search_review_requests(token, login) {
-    Ok(items) => {
-      println("github-personal-activity: review-requests=\{items.length()}")
-      append_unique_activities(review_requests, items)
-    }
-    Err(error) => errors.push("review requests: \{error}")
-  }
-  match @github_api.search_assignments(token, login) {
-    Ok(items) => {
-      println("github-personal-activity: assignments=\{items.length()}")
-      append_unique_activities(assignments, items)
-    }
-    Err(error) => errors.push("assignments: \{error}")
-  }
-  match @github_api.search_mentions(token, login) {
-    Ok(items) => {
-      println("github-personal-activity: mentions=\{items.length()}")
-      append_unique_activities(mentions, items)
-    }
-    Err(error) => errors.push("mentions: \{error}")
-  }
-  match @github_api.list_subscribed_issues(token) {
-    Ok(items) => {
-      println("github-personal-activity: subscriptions=\{items.length()}")
-      append_unique_activities(subscriptions, items)
-    }
-    Err(error) => errors.push("subscriptions: \{error}")
-  }
-  if errors.is_empty() {
-    None
-  } else {
-    Some("For you: \{errors.join(", ")}")
-  }
-}
-
-///|
-fn without_repository(
-  activities : Array[@github_api.ActivitySummary],
-  repository : String,
-) -> Array[@github_api.ActivitySummary] {
-  let remaining : Array[@github_api.ActivitySummary] = []
-  for activity in activities {
-    if activity.repository() != repository {
-      remaining.push(activity)
-    }
-  }
-  remaining
-}
-
-///|
-async fn fetch_repository_suggestions(
-  tokens : Map[String, String],
-  repo_scopes : Map[String, String],
-  owner_scopes : Map[String, String],
-  suggested_repositories : Array[@github_api.RepositorySummary],
-) -> String? {
-  repo_scopes.clear()
-  owner_scopes.clear()
-  let ordered_scopes : Array[String] = []
-  for scope, _ in tokens {
-    if scope != "default" {
-      ordered_scopes.push(scope)
-    }
-  }
-  ordered_scopes.sort()
-  if tokens.contains("default") {
-    ordered_scopes.insert(0, "default")
-  }
-  let seen : Map[String, Bool] = Map([])
-  let mut last_error : String? = None
-  for scope in ordered_scopes {
-    guard tokens.get(scope) is Some(token) else { continue }
-    match @github_api.list_accessible_repositories(token) {
-      Ok(repositories) => {
-        println(
-          "github-repositories: scope=\{scope} suggestions=\{repositories.length()}",
+    for entry in fresh {
+      let (activity, reason) = entry
+      let subtitle = "#\{activity.number()} \{activity.title()}"
+      if reason == "" {
+        post_notification(
+          activity.repository(),
+          subtitle,
+          "by @\{activity.author()}",
         )
-        for repository in repositories {
-          let key = repository.full_name()
-          let lowered_key = ascii_lower(key)
-          if !repo_scopes.contains(lowered_key) {
-            repo_scopes.set(lowered_key, scope)
-          }
-          match key.find("/") {
-            Some(index) => {
-              let owner_key = ascii_lower(key[:index].to_owned())
-              if !owner_scopes.contains(owner_key) {
-                owner_scopes.set(owner_key, scope)
-              }
-            }
-            None => ()
-          }
-          if !seen.contains(key) {
-            seen.set(key, true)
-            suggested_repositories.push(repository)
-          }
-        }
-      }
-      Err(error) => {
-        last_error = Some("\{scope}: \{error}")
-        println("github-repositories: scope=\{scope} \{error}")
+      } else {
+        post_notification(reason, subtitle, activity.repository())
       }
     }
+    return
   }
-  last_error
-}
-
-///|
-async fn refresh_personal_activity(
-  tokens : Map[String, String],
-  review_requests : Array[@github_api.ActivitySummary],
-  assignments : Array[@github_api.ActivitySummary],
-  mentions : Array[@github_api.ActivitySummary],
-  subscriptions : Array[@github_api.ActivitySummary],
-) -> String? {
-  if tokens.is_empty() {
-    return Some("no token")
-  }
-  review_requests.clear()
-  assignments.clear()
-  mentions.clear()
-  subscriptions.clear()
-  let mut last_error : String? = None
-  for scope, token in tokens {
-    let login = match @credential_store.load_login_label(scope) {
-      Some(login) => login
-      None =>
-        match @github_api.get_authenticated_user(token) {
-          Ok(user) => {
-            ignore(@credential_store.save_login_label(scope, user.login()))
-            user.login()
-          }
-          Err(error) => {
-            last_error = Some("\{scope}: \{error}")
-            continue
-          }
-        }
+  let order : Array[String] = []
+  let counts : Map[String, Int] = Map([])
+  let mut dependency_updates = 0
+  for entry in fresh {
+    let repository = entry.0.repository()
+    if !counts.contains(repository) {
+      order.push(repository)
     }
-    match
-      fetch_personal_activity(
-        token, login, review_requests, assignments, mentions, subscriptions,
-      ) {
-      Some(error) => {
-        last_error = Some("\{scope}: \{error}")
-        println("github-personal-activity: scope=\{scope} \{error}")
-      }
-      None => ()
+    counts.set(repository, counts.get(repository).unwrap_or(0) + 1)
+    if @domain.is_dependency_bot(entry.0.author()) {
+      dependency_updates += 1
     }
   }
-  last_error
-}
-
-///|
-async fn fetch_repository_activity(
-  tokens : Map[String, String],
-  repo_scopes : Map[String, String],
-  owner_scopes : Map[String, String],
-  repository : @domain.RepositoryRef,
-  pull_requests : Array[@github_api.ActivitySummary],
-  issues : Array[@github_api.ActivitySummary],
-) -> String? {
-  guard resolve_token(
-      tokens,
-      repo_scopes,
-      owner_scopes,
-      repository.owner(),
-      repository.name(),
-    )
-    is Some(token) else {
-    return Some("\{repository.key()}: no token for \{repository.owner()}")
-  }
-  let errors : Array[String] = []
-  match
-    @github_api.list_open_pull_requests(
-      token,
-      repository.owner(),
-      repository.name(),
-    ) {
-    Ok(items) => {
-      println(
-        "github-activity: \{repository.key()} pull-requests=\{items.length()}",
-      )
-      pull_requests.append(items)
-    }
-    Err(error) => errors.push("pull requests: \{error}")
-  }
-  match
-    @github_api.list_open_issues(token, repository.owner(), repository.name()) {
-    Ok(items) => {
-      println("github-activity: \{repository.key()} issues=\{items.length()}")
-      issues.append(items)
-    }
-    Err(error) => errors.push("issues: \{error}")
-  }
-  if errors.is_empty() {
-    None
+  let subtitle = order
+    .map(repository => "\{repository} \{counts.get(repository).unwrap_or(0)}")
+    .join(" · ")
+  let body = if dependency_updates > 0 {
+    "\{dependency_updates} are dependency updates"
   } else {
-    Some("\{repository.key()}: \{errors.join(", ")}")
+    "Open GitHub Client to review them."
+  }
+  post_notification(
+    "\{fresh.length()} updates in watched repositories",
+    subtitle,
+    body,
+  )
+}
+
+///|
+async fn open_in_browser(url : String) -> Bool {
+  match @shell.open(url) {
+    Ok(_) => true
+    Err(_) => {
+      let status = @async_shell.Cmd::Cmd("open", [url]).status() catch {
+        _ => return false
+      }
+      status == 0
+    }
   }
 }
 
@@ -662,8 +202,8 @@ async fn main {
       }
     Err(error) => println("repository-store: load failed: \{error}")
   }
-  let mut pull_requests : Array[@github_api.ActivitySummary] = []
-  let mut issues : Array[@github_api.ActivitySummary] = []
+  let pull_requests : Array[@github_api.ActivitySummary] = []
+  let issues : Array[@github_api.ActivitySummary] = []
   let suggested_repositories : Array[@github_api.RepositorySummary] = []
   let review_requests : Array[@github_api.ActivitySummary] = []
   let assignments : Array[@github_api.ActivitySummary] = []
@@ -694,12 +234,20 @@ async fn main {
   let saved_tokens : Map[String, String] = Map([])
   let repo_scopes : Map[String, String] = Map([])
   let owner_scopes : Map[String, String] = Map([])
-  let mut sync_status = "Add a token to load GitHub activity."
+  // Problems from the last fetches, keyed by token scope or repository.
+  let broken_scopes : Map[String, String] = Map([])
+  let scope_failures : Map[String, String] = Map([])
+  let repository_failures : Map[String, String] = Map([])
   for scope in @credential_store.list_scopes() {
     match @credential_store.load_token_for(scope) {
       Ok(Some(token)) => saved_tokens.set(scope, token)
       Ok(None) => ()
-      Err(error) => println("credential-store: load \{scope} failed: \{error}")
+      Err(error) => {
+        broken_scopes.set(
+          scope, "Couldn't read this token from the Keychain. Add it again to keep loading its repositories.",
+        )
+        println("credential-store: load \{scope} failed: \{error}")
+      }
     }
   }
   match saved_tokens.get("default") {
@@ -707,7 +255,6 @@ async fn main {
       match @github_api.get_authenticated_user(token) {
         Ok(user) => {
           authenticated_login = user.login()
-          sync_status = "Connected as @\{authenticated_login}."
           println("github-authenticated: \{authenticated_login}")
           if @credential_store.load_login_label("default") is None {
             ignore(
@@ -716,61 +263,29 @@ async fn main {
           }
         }
         Err(error) => {
-          sync_status = error
+          scope_failures.set("default", error)
           println("github-authentication: \{error}")
         }
       }
     None => ()
   }
-  match
-    fetch_repository_suggestions(
-      saved_tokens, repo_scopes, owner_scopes, suggested_repositories,
-    ) {
-    Some(error) => {
-      sync_status = "Repository suggestions: \{error}"
-      println("github-repositories: \{error}")
-    }
-    None => ()
-  }
-  match
-    refresh_personal_activity(
-      saved_tokens, review_requests, assignments, mentions, subscriptions,
-    ) {
-    Some(error) => {
-      sync_status = error
-      println("github-personal-activity: \{error}")
-    }
-    None => ()
-  }
-  for repository in model.repositories() {
-    match
-      fetch_repository_activity(
-        saved_tokens, repo_scopes, owner_scopes, repository, pull_requests, issues,
-      ) {
-      Some(error) => {
-        sync_status = error
-        println("github-activity: \{error}")
-      }
-      None => ()
-    }
-  }
+  let data_directory = @app_paths.data_directory().unwrap_or("")
   let seen_revisions : Map[String, String] = Map([])
+  let fresh_since : Map[String, Double] = Map([])
+  let expanded_bundles : Map[String, Bool] = Map([])
+  let dismissed_banners : Map[String, Bool] = Map([])
   let control_queue : Array[ControlCommand] = []
-  let control_path = match @app_paths.data_file("control.txt") {
-    Ok(path) => path
-    Err(_) => ""
-  }
+  let control_path = @app_paths.data_file("control.txt").unwrap_or("")
   if !@glfw.glfw_init() {
     println("github-client: GLFW initialization failed")
     return
   }
-
   let window_title = if authenticated_login == "" {
     "MoonBit GitHub Client"
   } else {
     "MoonBit GitHub Client - @\{authenticated_login}"
   }
-  let window = @glfw.create_opengl_window(1100, 720, window_title)
+  let window = @glfw.create_opengl_window(1180, 780, window_title)
   @glfw.make_context_current(window)
   @glfw.set_swap_interval(true)
   if !imgui_init(window) {
@@ -780,439 +295,1026 @@ async fn main {
     return
   }
 
-  let mut last_auto_refresh = imgui_now()
-  let mut last_control_poll = imgui_now()
-  while !@glfw.window_should_close(window) {
-    @glfw.poll_events()
-    let poll_now = imgui_now()
-    if control_path != "" && poll_now - last_control_poll >= 0.5 {
-      last_control_poll = poll_now
-      poll_control_commands(control_path, control_queue, [
+  let mut has_loaded = false
+  let mut last_synced : Double? = None
+  let mut snack_seq = 0
+  let mut snack_message = ""
+  let mut undo_op : UndoOp? = None
+  let mut alert_seq = 0
+  let mut alert_title = ""
+  let mut alert_body = ""
+  let mut token_state = 0
+  let mut token_field = 0
+  let mut token_message = ""
+  let mut token_open_seq = 0
+  let mut token_close_seq = 0
+  let mut token_prefill = ""
+  let mut auto_paused_until_ms = 0L
+  let pending_jobs : Array[FetchJob] = []
+  let mut running_job : FetchJob? = None
+  let mut running_task : @async.Task[Unit]? = None
+  // Each job gets a generation. A cancelled or timed-out job is abandoned
+  // without waiting for it: some GitHub reads never return and ignore
+  // cancellation, and their late results must not overwrite newer ones.
+  let mut active_generation = 0
+  let mut job_started_at = 0.0
+  let mut live_tasks = 0
+  let mut loading_detail = ""
+  let mut loading_done = 0
+  let mut loading_total = 0
+  if !saved_tokens.is_empty() {
+    pending_jobs.push(Startup)
+  }
+
+  fn notify(message : String, op : UndoOp?) -> Unit {
+    snack_seq += 1
+    snack_message = message
+    undo_op = op
+  }
+
+  fn activity_label(url : String) -> String {
+    match
+      find_activity(url, [
         pull_requests, issues, review_requests, assignments, mentions, subscriptions,
-      ])
+      ]) {
+      Some(activity) => "#\{activity.number()}"
+      None => "the item"
     }
-    record_seen_revisions(seen_revisions, [
-      pull_requests, issues, review_requests, assignments, mentions, subscriptions,
-    ])
-    let credential_count = @credential_store.list_scopes().length()
-    let action = imgui_render(
-      window,
-      model.page().code(),
-      model.sign_in_requests(),
-      model.repositories().length(),
-      credential_count,
-      repository_rows(model.repositories()),
-      suggested_repository_rows(suggested_repositories),
-      activity_rows(pull_requests, read_markers, saved_urls, muted_urls),
-      activity_rows(issues, read_markers, saved_urls, muted_urls),
-      personal_activity_rows(
-        review_requests,
-        assignments,
-        mentions,
-        subscriptions,
-        model.repositories(),
-        read_markers,
-        saved_urls,
-        muted_urls,
-      ),
-      saved_activity_rows(read_markers, saved_urls, muted_urls, [
-        pull_requests, issues, review_requests, assignments, mentions, subscriptions,
-      ]),
-      credentials_text(),
-      sync_status,
+  }
+
+  fn save_read_markers() -> Unit {
+    match @read_state_store.save_default(read_markers) {
+      Ok(_) => ()
+      Err(error) => println("read-state-store: save failed: \{error}")
+    }
+  }
+
+  fn save_triage() -> Unit {
+    match persist_triage(saved_urls, muted_urls) {
+      Ok(_) => ()
+      Err(error) => println("triage-store: save failed: \{error}")
+    }
+  }
+
+  // Rows that are new or changed since they were last on screen get a
+  // short highlight. The first load highlights nothing.
+  fn mark_fresh(sets : Array[Array[@github_api.ActivitySummary]]) -> Unit {
+    if !has_loaded {
+      return
+    }
+    let now = imgui_now()
+    for activities in sets {
+      for activity in activities {
+        if seen_revisions.get(activity.html_url()) !=
+          Some(activity.updated_at()) {
+          fresh_since.set(activity.html_url(), now)
+        }
+      }
+    }
+  }
+
+  // Each job fetches into fresh arrays and replaces the visible data only
+  // after the fetch completes, so frames rendered meanwhile never show a
+  // half-loaded list.
+  async fn fetch_watched(
+    next_pull_requests : Array[@github_api.ActivitySummary],
+    next_issues : Array[@github_api.ActivitySummary],
+  ) -> Unit {
+    repository_failures.clear()
+    let tasks = model
+      .repositories()
+      .map(repository => {
+        async fn() {
+          match
+            fetch_repository_activity(
+              saved_tokens, repo_scopes, owner_scopes, repository, next_pull_requests,
+              next_issues,
+            ) {
+            Some(error) => {
+              repository_failures.set(repository.key(), error)
+              println("github-activity: \{repository.key()}: \{error}")
+            }
+            None => ()
+          }
+          loading_done += 1
+        }
+      })
+    loading_detail = "Watched repositories"
+    ignore(@async.all(tasks, max_concurrent=6))
+  }
+
+  fn commit_watched(
+    generation : Int,
+    next_pull_requests : Array[@github_api.ActivitySummary],
+    next_issues : Array[@github_api.ActivitySummary],
+  ) -> Unit {
+    if generation != active_generation {
+      return
+    }
+    mark_fresh([next_pull_requests, next_issues])
+    // A repository removed while the fetch was running stays removed.
+    let watched = model.repositories()
+    replace_activities(
+      pull_requests,
+      next_pull_requests.filter(activity => {
+        @domain.repository_is_watched(watched, activity.repository())
+      }),
     )
-    let mut action = action
-    if action == 0 && !control_queue.is_empty() {
-      let command = control_queue.remove(0)
-      if command.action == 99 {
-        @glfw.set_window_should_close(window, true)
-      } else {
-        github_client_imgui_stage(
-          command.url,
-          command.updated_at,
-          command.repository,
-        )
-        action = command.action
-      }
+    replace_activities(
+      issues,
+      next_issues.filter(activity => {
+        @domain.repository_is_watched(watched, activity.repository())
+      }),
+    )
+    has_loaded = true
+    last_synced = Some(imgui_now())
+  }
+
+  async fn fetch_personal(
+    next : Array[Array[@github_api.ActivitySummary]],
+  ) -> Unit {
+    refresh_personal_activity(
+      saved_tokens,
+      next[0],
+      next[1],
+      next[2],
+      next[3],
+      scope_failures,
+      _ => loading_detail = "For you and watched repositories",
+      () => loading_done += 1,
+    )
+  }
+
+  fn commit_personal(
+    generation : Int,
+    next : Array[Array[@github_api.ActivitySummary]],
+  ) -> Unit {
+    if generation != active_generation {
+      return
     }
-    match action {
-      1 => {
-        model = @domain.update(model, @domain.Msg::RequestSignIn)
-        println("ui-action: auth.sign-in count=\{model.sign_in_requests()}")
-      }
-      2 =>
-        match @domain.RepositoryRef::parse(imgui_take_repository()) {
-          Ok(repository) => {
-            let previous_count = model.repositories().length()
-            model = @domain.update(
-              model,
-              @domain.Msg::RegisterRepository(repository),
-            )
-            match @repository_store.save_default(model.repositories()) {
-              Ok(_) => println("ui-action: repository.register")
-              Err(error) => println("repository-store: save failed: \{error}")
-            }
-            if model.repositories().length() > previous_count {
-              if saved_tokens.is_empty() {
-                sync_status = "Repository saved. Add a token to load activity."
-              } else {
-                match
-                  fetch_repository_activity(
-                    saved_tokens, repo_scopes, owner_scopes, repository, pull_requests,
-                    issues,
-                  ) {
-                  Some(error) => sync_status = error
-                  None => sync_status = "Repository activity loaded."
-                }
-                match
-                  refresh_personal_activity(
-                    saved_tokens, review_requests, assignments, mentions, subscriptions,
-                  ) {
-                  Some(error) => sync_status = error
-                  None => ()
-                }
-              }
-            } else {
-              sync_status = "Repository is already registered."
-            }
-          }
-          Err(error) => {
-            sync_status = error
-            println("repository-register: \{error}")
-          }
-        }
-      3 => {
-        let scope_raw = imgui_take_credential_scope()
-        let token = imgui_take_token()
-        match @credential_store.normalize_scope(scope_raw) {
-          Err(error) => {
-            sync_status = error
-            println("credential-scope: \{error}")
-          }
-          Ok(scope) =>
-            match @credential_store.save_token_for(scope, token) {
-              Ok(_) =>
-                match @github_api.get_authenticated_user(token) {
-                  Ok(user) => {
-                    saved_tokens.set(scope, token)
-                    match
-                      @credential_store.save_login_label(scope, user.login()) {
-                      Ok(_) => ()
-                      Err(error) =>
-                        println(
-                          "credential-store: login label failed: \{error}",
-                        )
-                    }
-                    sync_status = "Saved token for \{scope} (@\{user.login()})."
-                    if scope == "default" {
-                      authenticated_login = user.login()
-                    }
-                    suggested_repositories.clear()
-                    match
-                      fetch_repository_suggestions(
-                        saved_tokens, repo_scopes, owner_scopes, suggested_repositories,
-                      ) {
-                      Some(error) =>
-                        sync_status = "Repository suggestions: \{error}"
-                      None => ()
-                    }
-                    match
-                      refresh_personal_activity(
-                        saved_tokens, review_requests, assignments, mentions, subscriptions,
-                      ) {
-                      Some(error) => sync_status = error
-                      None => ()
-                    }
-                    pull_requests.clear()
-                    issues.clear()
-                    for repository in model.repositories() {
-                      match
-                        fetch_repository_activity(
-                          saved_tokens, repo_scopes, owner_scopes, repository, pull_requests,
-                          issues,
-                        ) {
-                        Some(error) => sync_status = error
-                        None => ()
-                      }
-                    }
-                    println("ui-action: auth.pat-saved scope=\{scope}")
-                  }
-                  Err(error) => {
-                    sync_status = error
-                    println("github-authentication: \{error}")
-                  }
-                }
-              Err(error) => {
-                sync_status = error
-                println("credential-store: save failed: \{error}")
-              }
-            }
-        }
-      }
-      4 => {
-        let url = imgui_take_url()
-        match @shell.open(url) {
-          Ok(_) => println("ui-action: activity.open")
-          Err(_) => {
-            let status = @async_shell.Cmd::Cmd("open", [url]).status()
-            if status == 0 {
-              println("ui-action: activity.open")
-            } else {
-              sync_status = "Could not open the link."
-              println("shell: open exited with \{status}")
-            }
-          }
-        }
-      }
-      5 => {
-        let repository = imgui_take_selected_repository()
-        model = @domain.update(model, @domain.Msg::RemoveRepository(repository))
-        pull_requests = without_repository(pull_requests, repository)
-        issues = without_repository(issues, repository)
-        match
-          refresh_personal_activity(
-            saved_tokens, review_requests, assignments, mentions, subscriptions,
-          ) {
-          Some(error) => sync_status = error
-          None => ()
-        }
+    mark_fresh(next)
+    replace_activities(review_requests, next[0])
+    replace_activities(assignments, next[1])
+    replace_activities(mentions, next[2])
+    replace_activities(subscriptions, next[3])
+    last_synced = Some(imgui_now())
+  }
+
+  async fn load_personal(generation : Int) -> Unit {
+    let next = [[], [], [], []]
+    fetch_personal(next)
+    commit_personal(generation, next)
+  }
+
+  async fn load_watched(generation : Int) -> Unit {
+    let next_pull_requests = []
+    let next_issues = []
+    fetch_watched(next_pull_requests, next_issues)
+    commit_watched(generation, next_pull_requests, next_issues)
+  }
+
+  async fn load_suggestions_then_watched(generation : Int) -> Unit {
+    let next_suggestions = []
+    let next_repo_scopes : Map[String, String] = Map([])
+    let next_owner_scopes : Map[String, String] = Map([])
+    fetch_repository_suggestions(
+      saved_tokens, next_repo_scopes, next_owner_scopes, next_suggestions, scope_failures,
+    )
+    if generation != active_generation {
+      return
+    }
+    suggested_repositories.clear()
+    suggested_repositories.append(next_suggestions)
+    replace_scopes(repo_scopes, next_repo_scopes)
+    replace_scopes(owner_scopes, next_owner_scopes)
+    loading_done += 1
+    load_watched(generation)
+  }
+
+  async fn load_everything(generation : Int) -> Unit {
+    ignore(
+      @async.all([
+        async fn() { load_personal(generation) },
+        async fn() { load_watched(generation) },
+      ]),
+    )
+  }
+
+  async fn reload_all(generation : Int) -> Unit {
+    scope_failures.clear()
+    loading_total = 1 + saved_tokens.length() + model.repositories().length()
+    loading_done = 0
+    loading_detail = "Accounts and repositories"
+    // For you does not depend on the token assignment that suggestions
+    // produce, so it runs alongside suggestions and watched repositories.
+    ignore(
+      @async.all([
+        async fn() { load_suggestions_then_watched(generation) },
+        async fn() { load_personal(generation) },
+      ]),
+    )
+  }
+
+  fn watch_repository(raw : String) -> Unit {
+    match @domain.RepositoryRef::parse(raw) {
+      Ok(repository) => {
+        let previous_count = model.repositories().length()
+        model = @domain.update(
+          model,
+          @domain.Msg::RegisterRepository(repository),
+        )
         match @repository_store.save_default(model.repositories()) {
-          Ok(_) => {
-            sync_status = "Removed \{repository} from Watched repositories."
-            println("ui-action: repository.remove")
-          }
-          Err(error) => {
-            sync_status = error
-            println("repository-store: save failed: \{error}")
-          }
+          Ok(_) => println("ui-action: repository.register")
+          Err(error) => println("repository-store: save failed: \{error}")
         }
-      }
-      6 => {
-        let url = imgui_take_url()
-        let updated_at = imgui_take_activity_updated_at()
-        if @domain.activity_is_read(read_markers, url, updated_at) {
-          read_markers = @domain.mark_activity_unread(read_markers, url)
-          sync_status = "Moved back to inbox."
-          println("ui-action: activity.restore")
+        dismissed_banners.set("watch:\{repository.key()}", true)
+        if model.repositories().length() == previous_count {
+          notify("\{repository.key()} is already watched.", None)
+        } else if saved_tokens.is_empty() {
+          notify("Watching \{repository.key()}. Add a token to load it.", None)
         } else {
-          read_markers = @domain.mark_activity_read(
-            read_markers, url, updated_at,
-          )
-          sync_status = "Marked as done."
-          println("ui-action: activity.done")
-        }
-        match @read_state_store.save_default(read_markers) {
-          Ok(_) => ()
-          Err(error) => {
-            sync_status = error
-            println("read-state-store: save failed: \{error}")
-          }
+          pending_jobs.push(AddedRepository(repository))
         }
       }
-      22 => {
-        let url = imgui_take_url()
-        if saved_urls.contains(url) {
-          saved_urls.remove(url)
-          sync_status = "Removed from Saved."
-          println("ui-action: activity.unsave")
-        } else {
-          saved_urls.set(url, true)
-          sync_status = "Saved for later."
-          println("ui-action: activity.save")
-        }
-        match persist_triage(saved_urls, muted_urls) {
-          Ok(_) => ()
-          Err(error) => println("triage-store: save failed: \{error}")
-        }
+      Err(error) => {
+        notify("Enter a repository as owner/name.", None)
+        println("repository-register: \{error}")
       }
-      23 => {
-        let url = imgui_take_url()
-        muted_urls.set(url, true)
-        match persist_triage(saved_urls, muted_urls) {
-          Ok(_) => {
-            sync_status = "Unsubscribed. The item is hidden and excluded from notifications."
-            println("ui-action: activity.unsubscribe")
-          }
-          Err(error) => {
-            sync_status = error
-            println("triage-store: save failed: \{error}")
-          }
+    }
+  }
+
+  async fn run_job(job : FetchJob, generation : Int) -> Unit {
+    loading_done = 0
+    loading_total = 0
+    match job {
+      Startup | Credentials(_) => reload_all(generation)
+      VerifyToken(scope, token) => {
+        loading_detail = "Checking the token with GitHub"
+        let verified = @github_api.get_authenticated_user(token)
+        if generation != active_generation {
+          return
         }
-      }
-      7 => {
-        let scope = imgui_take_selected_credential()
-        match @credential_store.delete_token_for(scope) {
-          Ok(_) => {
-            saved_tokens.remove(scope)
-            if scope == "default" {
-              authenticated_login = ""
-            }
-            suggested_repositories.clear()
-            match
-              fetch_repository_suggestions(
-                saved_tokens, repo_scopes, owner_scopes, suggested_repositories,
-              ) {
-              Some(error) => sync_status = "Repository suggestions: \{error}"
-              None => ()
-            }
-            match
-              refresh_personal_activity(
-                saved_tokens, review_requests, assignments, mentions, subscriptions,
-              ) {
-              Some(error) => sync_status = error
-              None => ()
-            }
-            for repository in model.repositories() {
-              pull_requests = without_repository(
-                pull_requests,
-                repository.key(),
-              )
-              issues = without_repository(issues, repository.key())
-              match
-                fetch_repository_activity(
-                  saved_tokens, repo_scopes, owner_scopes, repository, pull_requests,
-                  issues,
-                ) {
-                Some(error) => sync_status = error
-                None => ()
+        match verified {
+          Ok(user) =>
+            match @credential_store.save_token_for(scope, token) {
+              Ok(_) => {
+                saved_tokens.set(scope, token)
+                ignore(@credential_store.save_login_label(scope, user.login()))
+                if scope == "default" {
+                  authenticated_login = user.login()
+                }
+                broken_scopes.remove(scope)
+                scope_failures.remove(scope)
+                dismissed_banners.remove("token:\{scope}")
+                token_state = 0
+                token_close_seq += 1
+                notify(
+                  "Connected \{scope_label(scope)} as @\{user.login()}.",
+                  None,
+                )
+                println("ui-action: auth.pat-saved scope=\{scope}")
+                pending_jobs.push(Credentials(""))
+              }
+              Err(error) => {
+                token_state = 2
+                token_field = 1
+                token_message = "The token could not be saved: \{error}"
               }
             }
-            sync_status = "Removed credential for \{scope}."
-            println("ui-action: credential.remove scope=\{scope}")
-          }
           Err(error) => {
-            sync_status = error
-            println("credential-store: delete failed: \{error}")
+            token_state = 2
+            token_field = 1
+            token_message = if @github_api.classify_failure(error)
+              is Unauthorized {
+              "GitHub rejected this token. Check that it was copied completely and has not expired."
+            } else {
+              "Couldn't verify the token: \{error}"
+            }
+            println("github-authentication: \{error}")
           }
         }
       }
-      20 => {
-        pull_requests.clear()
-        issues.clear()
-        let mut refresh_error : String? = None
-        for repository in model.repositories() {
-          match
-            fetch_repository_activity(
-              saved_tokens, repo_scopes, owner_scopes, repository, pull_requests,
-              issues,
-            ) {
-            Some(error) => refresh_error = Some(error)
-            None => ()
-          }
-        }
-        match refresh_error {
-          Some(error) => sync_status = error
-          None => sync_status = "Watched activity refreshed."
-        }
-        println("ui-action: refresh.watched")
+      Watched => {
+        loading_total = model.repositories().length()
+        load_watched(generation)
       }
-      21 =>
-        if saved_tokens.is_empty() {
-          sync_status = "Add a token to load personal activity."
-        } else {
-          match
-            refresh_personal_activity(
-              saved_tokens, review_requests, assignments, mentions, subscriptions,
-            ) {
-            Some(error) => sync_status = error
-            None => sync_status = "For you refreshed."
-          }
-          println("ui-action: refresh.for-you")
-        }
-      10 => {
-        model = @domain.update(
-          model,
-          @domain.Msg::Navigate(@domain.Page::Inbox),
-        )
-        println("ui-action: nav.inbox")
+      Personal => {
+        loading_total = saved_tokens.length()
+        scope_failures.clear()
+        load_personal(generation)
       }
-      11 => {
-        model = @domain.update(
-          model,
-          @domain.Msg::Navigate(@domain.Page::Repositories),
-        )
-        println("ui-action: nav.repositories")
+      Everything => {
+        loading_total = saved_tokens.length() + model.repositories().length()
+        scope_failures.clear()
+        load_everything(generation)
       }
-      12 => {
-        model = @domain.update(
-          model,
-          @domain.Msg::Navigate(@domain.Page::PullRequests),
-        )
-        println("ui-action: nav.pull-requests")
-      }
-      13 => {
-        model = @domain.update(
-          model,
-          @domain.Msg::Navigate(@domain.Page::Issues),
-        )
-        println("ui-action: nav.issues")
-      }
-      14 => {
-        model = @domain.update(
-          model,
-          @domain.Msg::Navigate(@domain.Page::Settings),
-        )
-        println("ui-action: nav.settings")
-      }
-      15 => {
-        model = @domain.update(
-          model,
-          @domain.Msg::Navigate(@domain.Page::ForYou),
-        )
-        println("ui-action: nav.for-you")
-      }
-      16 => {
-        model = @domain.update(
-          model,
-          @domain.Msg::Navigate(@domain.Page::Saved),
-        )
-        println("ui-action: nav.saved")
-      }
-      _ => ()
-    }
-    if imgui_auto_refresh_enabled() && !saved_tokens.is_empty() {
-      let now = imgui_now()
-      if now - last_auto_refresh >= 300.0 {
-        last_auto_refresh = now
-        pull_requests.clear()
-        issues.clear()
-        let mut refresh_error : String? = None
-        for repository in model.repositories() {
-          match
-            fetch_repository_activity(
-              saved_tokens, repo_scopes, owner_scopes, repository, pull_requests,
-              issues,
-            ) {
-            Some(error) => refresh_error = Some(error)
-            None => ()
-          }
-        }
+      RemovedRepository => load_personal(generation)
+      AddedRepository(repository) => {
+        loading_total = 1 + saved_tokens.length()
+        loading_detail = repository.key()
+        let next_pull_requests = []
+        let next_issues = []
         match
-          refresh_personal_activity(
-            saved_tokens, review_requests, assignments, mentions, subscriptions,
+          fetch_repository_activity(
+            saved_tokens, repo_scopes, owner_scopes, repository, next_pull_requests,
+            next_issues,
           ) {
-          Some(error) => refresh_error = Some(error)
-          None => ()
+          Some(error) => repository_failures.set(repository.key(), error)
+          None => repository_failures.remove(repository.key())
         }
-        let fresh = collect_fresh_labels(
-          seen_revisions,
-          model.repositories(),
-          muted_urls,
-          [pull_requests, issues],
-          [review_requests, assignments, mentions, subscriptions],
+        loading_done += 1
+        if generation != active_generation {
+          return
+        }
+        if @domain.repository_is_watched(model.repositories(), repository.key()) {
+          replace_activities(
+            pull_requests,
+            without_repository(pull_requests, repository.key()),
+          )
+          pull_requests.append(next_pull_requests)
+          replace_activities(
+            issues,
+            without_repository(issues, repository.key()),
+          )
+          issues.append(next_issues)
+        }
+        load_personal(generation)
+      }
+      Auto => {
+        loading_total = saved_tokens.length() + model.repositories().length()
+        let next_pull_requests = []
+        let next_issues = []
+        let next_personal = [[], [], [], []]
+        scope_failures.clear()
+        ignore(
+          @async.all([
+            async fn() { fetch_watched(next_pull_requests, next_issues) },
+            async fn() { fetch_personal(next_personal) },
+          ]),
         )
-        match refresh_error {
-          Some(error) => sync_status = error
-          None => sync_status = "Auto refreshed."
+        // Compare against the seen revisions before committing: every frame
+        // records visible items as seen.
+        let watched = model.repositories()
+        let fresh : Array[(@github_api.ActivitySummary, String)] = []
+        let fresh_urls : Map[String, Bool] = Map([])
+        let reasons = [
+          "Review requested", "Assigned", "Mentioned", "Subscribed",
+        ]
+        let candidates : Array[(@github_api.ActivitySummary, String)] = []
+        for activity in next_pull_requests {
+          candidates.push((activity, ""))
         }
+        for activity in next_issues {
+          candidates.push((activity, ""))
+        }
+        for index, activities in next_personal {
+          for activity in activities {
+            if @domain.repository_is_watched(watched, activity.repository()) {
+              candidates.push((activity, reasons[index]))
+            }
+          }
+        }
+        for entry in candidates {
+          let url = entry.0.html_url()
+          if !muted_urls.contains(url) &&
+            !fresh_urls.contains(url) &&
+            seen_revisions.get(url) != Some(entry.0.updated_at()) {
+            fresh_urls.set(url, true)
+            fresh.push(entry)
+          }
+        }
+        if generation != active_generation {
+          return
+        }
+        commit_watched(generation, next_pull_requests, next_issues)
+        commit_personal(generation, next_personal)
         println("auto-refresh: fresh=\{fresh.length()}")
         notify_fresh_activities(fresh)
       }
     }
-    @glfw.swap_buffers(window)
   }
 
-  imgui_shutdown()
+  fn apply_undo(op : UndoOp) -> Unit {
+    match op {
+      Restore(entries) => {
+        for entry in entries {
+          let (url, previous) = entry
+          read_markers = match previous {
+            Some(read_at) =>
+              @domain.mark_activity_read(read_markers, url, read_at)
+            None => @domain.mark_activity_unread(read_markers, url)
+          }
+        }
+        save_read_markers()
+      }
+      Unmute(url) => {
+        muted_urls.remove(url)
+        save_triage()
+      }
+      ToggleSave(url) => {
+        if saved_urls.contains(url) {
+          saved_urls.remove(url)
+        } else {
+          saved_urls.set(url, true)
+        }
+        save_triage()
+      }
+      Rewatch(repository) => watch_repository(repository.key())
+    }
+    notify("Undone.", None)
+    println("ui-action: undo")
+  }
+
+  fn job_timed_out(job : FetchJob) -> Unit {
+    if job is VerifyToken(_, _) {
+      token_state = 2
+      token_field = 1
+      token_message = "GitHub didn't respond in time. Try again."
+    } else if job.is_modal() {
+      alert_seq += 1
+      alert_title = "\{job.title()} took too long"
+      alert_body = "GitHub didn't finish responding within 90 seconds. The lists still show the results from the last successful refresh."
+    } else {
+      notify("\{job.title()} timed out.", None)
+    }
+  }
+
+  fn job_finished() -> Unit {
+    // A rate limit pauses auto refresh until GitHub resets it.
+    for failures in [scope_failures, repository_failures] {
+      for _, message in failures {
+        if @github_api.classify_failure(message) is RateLimited(epoch) {
+          auto_paused_until_ms = epoch * 1000L
+        }
+      }
+    }
+    if !repository_failures.is_empty() || !scope_failures.is_empty() {
+      // A new failure shows its banner again even if one was dismissed.
+      dismissed_banners.clear()
+    }
+    running_job = None
+    running_task = None
+  }
+
+  // Stops waiting for the running job. Its task is asked to cancel, but a
+  // read stuck inside the HTTP client may keep running; its results are
+  // ignored because the generation moves on.
+  fn abandon_job() -> Unit {
+    match running_task {
+      Some(task) => task.cancel()
+      None => ()
+    }
+    active_generation += 1
+    running_job = None
+    running_task = None
+  }
+
+  let mut last_auto_refresh = imgui_now()
+  let mut last_control_poll = imgui_now()
+  @async.with_task_group(group => {
+    while !@glfw.window_should_close(window) {
+      @glfw.poll_events()
+      let now = imgui_now()
+      if control_path != "" && now - last_control_poll >= 0.5 {
+        last_control_poll = now
+        poll_control_commands(control_path, control_queue, [
+          pull_requests, issues, review_requests, assignments, mentions, subscriptions,
+        ])
+      }
+      for
+        activities in [
+          pull_requests, issues, review_requests, assignments, mentions, subscriptions,
+        ] {
+        for activity in activities {
+          seen_revisions.set(activity.html_url(), activity.updated_at())
+        }
+      }
+      if running_job is None && !pending_jobs.is_empty() {
+        let job = pending_jobs.remove(0)
+        running_job = Some(job)
+        loading_detail = ""
+        active_generation += 1
+        let generation = active_generation
+        job_started_at = now
+        live_tasks += 1
+        running_task = Some(
+          group.spawn(no_wait=true, allow_failure=true, () => {
+            defer {
+              live_tasks -= 1
+            }
+            let failed = try
+              @async.with_timeout_opt(FETCH_JOB_TIMEOUT_MS, () => {
+                run_job(job, generation)
+              })
+            catch {
+              error => {
+                if generation == active_generation {
+                  notify("\{job.title()} failed.", None)
+                }
+                println("fetch-job: \{job.title()} failed: \{error}")
+                true
+              }
+            } noraise {
+              None => {
+                if generation == active_generation {
+                  job_timed_out(job)
+                }
+                true
+              }
+              Some(_) => false
+            }
+            println(
+              "fetch-job: finished \{job.title()} generation=\{generation}",
+            )
+            // An abandoned job must not touch the state of the jobs after it.
+            if generation != active_generation {
+              return
+            }
+            if !failed &&
+              repository_failures.is_empty() &&
+              scope_failures.is_empty() {
+              match job.success_message() {
+                Some(message) => notify(message, None)
+                None => ()
+              }
+            }
+            job_finished()
+          }),
+        )
+      }
+      // Backstop for reads that ignore cancellation and the timeout above.
+      match running_job {
+        Some(job) if now - job_started_at >
+          FETCH_JOB_TIMEOUT_MS.to_double() / 1000.0 + 5.0 => {
+          println("fetch-job: abandoning \{job.title()} after timeout")
+          abandon_job()
+          job_timed_out(job)
+        }
+        _ => ()
+      }
+      let modal_job = match running_job {
+        Some(job) if job.is_modal() => Some(job)
+        _ =>
+          for job in pending_jobs {
+            if job.is_modal() {
+              break Some(job)
+            }
+          } nobreak {
+            None
+          }
+      }
+      // The first load shows skeleton rows; once watched activity is on
+      // screen, the rest of it continues in the background.
+      let busy = if running_job is Some(Startup) && !has_loaded {
+        3
+      } else if running_job is Some(Startup) && pending_jobs.is_empty() {
+        1
+      } else if modal_job is Some(_) {
+        2
+      } else if running_job is Some(_) {
+        1
+      } else {
+        0
+      }
+      let loading = match modal_job {
+        None =>
+          match running_job {
+            Some(job) => "\{job.title()}\t\{loading_detail}"
+            None => "\t"
+          }
+        Some(job) =>
+          if running_job is Some(running) && running.is_modal() {
+            "\{job.title()}\t\{safe_row_text(loading_detail)}"
+          } else {
+            "\{job.title()}\tWaiting for auto refresh to finish"
+          }
+      }
+      let cancellable = match running_job {
+        Some(job) => job.is_cancellable()
+        None => false
+      }
+      // Rows for the current page.
+      let page = model.page()
+      let filter = imgui_view_filter()
+      let watched = model.repositories()
+      let inbox_items = watched_items([pull_requests, issues], muted_urls)
+      let for_you_items = personal_items(
+        review_requests,
+        assignments,
+        mentions,
+        subscriptions,
+        watched,
+        muted_urls,
+        watched_only=true,
+      )
+      let (rows, show_repository) = match page {
+        Inbox | PullRequests | Issues =>
+          (
+            @domain.build_activity_rows(
+              inbox_items,
+              read_markers,
+              saved_urls,
+              { ..filter, reason: "", },
+              expanded_bundles,
+              ByRepository,
+            ),
+            false,
+          )
+        ForYou =>
+          (
+            @domain.build_activity_rows(
+              for_you_items,
+              read_markers,
+              saved_urls,
+              {
+                ..@domain.ActivityFilter::default(),
+                reason: filter.reason,
+                show_done: filter.show_done,
+              },
+              expanded_bundles,
+              Flat,
+            ),
+            true,
+          )
+        Saved =>
+          (
+            @domain.build_activity_rows(
+              saved_items(
+                [
+                  pull_requests, issues, review_requests, assignments, mentions,
+                  subscriptions,
+                ],
+                saved_urls,
+                muted_urls,
+              ),
+              read_markers,
+              saved_urls,
+              { ..@domain.ActivityFilter::default(), show_done: true, },
+              expanded_bundles,
+              Flat,
+            ),
+            true,
+          )
+        Repositories | Settings => ([], false)
+      }
+      for key, since in fresh_since {
+        if now - since > 3.0 {
+          fresh_since.remove(key)
+        }
+      }
+      let inbox_unread = unread_count(inbox_items, read_markers)
+      let for_you_unread = unread_count(for_you_items, read_markers)
+      let header = match page {
+        Inbox | PullRequests | Issues => {
+          let noun = if watched.length() == 1 {
+            "repository"
+          } else {
+            "repositories"
+          }
+          "\{inbox_unread} unread of \{inbox_items.length()} · \{watched.length()} watched \{noun}"
+        }
+        ForYou =>
+          "\{for_you_unread} unread of \{for_you_items.length()} · review requests, assignments, mentions, and subscriptions in watched repositories"
+        Saved => "Kept here until you remove them, even after Done"
+        Repositories =>
+          "Inbox and For you show activity from these repositories only."
+        Settings => "Accounts and sync"
+      }
+      let has_data = !inbox_items.is_empty() || !for_you_items.is_empty()
+      let banners = match page {
+        Inbox | PullRequests | Issues | ForYou | Saved => {
+          let problems = problem_banners(
+            scope_failures,
+            broken_scopes,
+            repository_failures,
+            watched.length(),
+            has_data,
+            dismissed_banners,
+          )
+          if page is ForYou {
+            problems.append(
+              hidden_review_banners(
+                review_requests, watched, muted_urls, dismissed_banners,
+              ),
+            )
+          }
+          problems
+        }
+        _ => []
+      }
+      let network_down = [scope_failures, repository_failures].any(failures => {
+        failures
+        .values()
+        .any(message => @github_api.classify_failure(message) is Network)
+      })
+      let page_error = if busy == 0 && !has_data && network_down {
+        "Can't reach GitHub\tThe request failed before GitHub responded. Check your network connection, then try again."
+      } else {
+        "\t"
+      }
+      let credential_problems : Map[String, String] = Map([])
+      for scope, message in scope_failures {
+        if @github_api.classify_failure(message) is Unauthorized {
+          credential_problems.set(
+            scope, "GitHub rejected this token. It may have expired or been revoked.",
+          )
+        }
+      }
+      for scope, message in broken_scopes {
+        credential_problems.set(scope, message)
+      }
+      let has_credentials = !@credential_store.list_scopes().is_empty()
+      let flags = (if has_credentials { 1 } else { 0 }) |
+        (if cancellable { 2 } else { 0 })
+      let action = github_client_imgui_render(
+        window,
+        page.code(),
+        busy,
+        loading_done,
+        loading_total,
+        flags,
+        "\{inbox_unread}\t\{for_you_unread}\t\{watched.length()}\t\{authenticated_login}\t\{data_directory}",
+        "\{safe_row_text(header)}\t\{synced_label(last_synced, now)}",
+        serialize_rows(rows, show_repository, fresh_since, now),
+        repositories_text(watched),
+        suggestions_text(suggested_repositories, watched, review_requests),
+        credentials_text(credential_problems),
+        banners_text(banners),
+        loading,
+        "\{snack_seq}\t\{safe_row_text(snack_message)}\t\{flag(undo_op is Some(_))}",
+        "\{alert_seq}\t\{safe_row_text(alert_title)}\t\{safe_row_text(alert_body)}",
+        "\{token_state}\t\{token_field}\t\{safe_row_text(token_message)}\t\{token_open_seq}\t\{token_close_seq}\t\{token_prefill}",
+        page_error,
+      )
+      token_prefill = ""
+      let mut action = action
+      // Commands wait while a fetch runs, as the loading dialog blocks UI
+      // input; quit and cancel always go through.
+      if action == 0 && !control_queue.is_empty() {
+        // While busy only quit, cancel, and undo may pass the commands
+        // queued before them.
+        let allowed = (command : ControlCommand) => {
+          busy == 0 || command.action is (99 | 27 | 26)
+        }
+        let index = for i, command in control_queue {
+          if allowed(command) {
+            break Some(i)
+          }
+        } nobreak {
+          None
+        }
+        if index is Some(i) {
+          let command = control_queue.remove(i)
+          if command.action == 99 {
+            @glfw.set_window_should_close(window, true)
+          } else {
+            github_client_imgui_stage(
+              command.url,
+              command.updated_at,
+              command.repository,
+              command.key,
+            )
+            action = command.action
+          }
+        }
+      }
+      match action {
+        1 => {
+          model = @domain.update(model, @domain.Msg::RequestSignIn)
+          token_state = 0
+          token_message = ""
+          token_open_seq += 1
+          println("ui-action: auth.sign-in")
+        }
+        2 => watch_repository(github_client_imgui_take_repository())
+        3 => {
+          let scope_raw = github_client_imgui_take_credential_scope()
+          let token = github_client_imgui_take_token().trim().to_owned()
+          match @credential_store.normalize_scope(scope_raw) {
+            Err(_) => {
+              token_state = 2
+              token_field = 0
+              token_message = "Use letters, numbers, and hyphens only, as in a GitHub URL."
+            }
+            Ok(scope) => {
+              token_state = 1
+              pending_jobs.push(VerifyToken(scope, token))
+            }
+          }
+        }
+        4 => {
+          let url = github_client_imgui_take_url()
+          if open_in_browser(url) {
+            println("ui-action: activity.open")
+          } else {
+            notify("Couldn't open the link.", None)
+          }
+        }
+        5 => {
+          let key = github_client_imgui_take_selected_repository()
+          match @domain.RepositoryRef::parse(key) {
+            Ok(repository) => {
+              model = @domain.update(model, @domain.Msg::RemoveRepository(key))
+              replace_activities(
+                pull_requests,
+                without_repository(pull_requests, key),
+              )
+              replace_activities(issues, without_repository(issues, key))
+              repository_failures.remove(key)
+              match @repository_store.save_default(model.repositories()) {
+                Ok(_) => {
+                  notify("Unwatched \{key}.", Some(Rewatch(repository)))
+                  println("ui-action: repository.remove")
+                }
+                Err(error) => println("repository-store: save failed: \{error}")
+              }
+              pending_jobs.push(RemovedRepository)
+            }
+            Err(_) => ()
+          }
+        }
+        6 => {
+          let url = github_client_imgui_take_url()
+          let updated_at = github_client_imgui_take_activity_updated_at()
+          let previous = previous_read_at(read_markers, url)
+          let label = activity_label(url)
+          if @domain.activity_is_read(read_markers, url, updated_at) {
+            read_markers = @domain.mark_activity_unread(read_markers, url)
+            notify(
+              "Moved \{label} back to the inbox.",
+              Some(Restore([(url, previous)])),
+            )
+            println("ui-action: activity.restore")
+          } else {
+            read_markers = @domain.mark_activity_read(
+              read_markers, url, updated_at,
+            )
+            notify("Marked \{label} as done.", Some(Restore([(url, previous)])))
+            println("ui-action: activity.done")
+          }
+          save_read_markers()
+        }
+        22 => {
+          let url = github_client_imgui_take_url()
+          let label = activity_label(url)
+          if saved_urls.contains(url) {
+            saved_urls.remove(url)
+            notify("Removed \{label} from Saved.", Some(ToggleSave(url)))
+            println("ui-action: activity.unsave")
+          } else {
+            saved_urls.set(url, true)
+            notify("Saved \{label} for later.", Some(ToggleSave(url)))
+            println("ui-action: activity.save")
+          }
+          save_triage()
+        }
+        23 => {
+          let url = github_client_imgui_take_url()
+          muted_urls.set(url, true)
+          save_triage()
+          notify("Unsubscribed from \{activity_label(url)}.", Some(Unmute(url)))
+          println("ui-action: activity.unsubscribe")
+        }
+        7 => {
+          let scope = github_client_imgui_take_selected_credential()
+          match @credential_store.delete_token_for(scope) {
+            Ok(_) => {
+              saved_tokens.remove(scope)
+              broken_scopes.remove(scope)
+              scope_failures.remove(scope)
+              if scope == "default" {
+                authenticated_login = ""
+              }
+              pending_jobs.push(
+                Credentials("Removed the \{scope_label(scope)} token."),
+              )
+              println("ui-action: credential.remove scope=\{scope}")
+            }
+            Err(error) => {
+              notify("Couldn't remove the token.", None)
+              println("credential-store: delete failed: \{error}")
+            }
+          }
+        }
+        20 => {
+          pending_jobs.push(Watched)
+          println("ui-action: refresh.watched")
+        }
+        21 => {
+          pending_jobs.push(Personal)
+          println("ui-action: refresh.for-you")
+        }
+        32 => {
+          pending_jobs.push(Everything)
+          println("ui-action: refresh.all")
+        }
+        24 => {
+          let key = github_client_imgui_take_key()
+          if expanded_bundles.contains(key) {
+            expanded_bundles.remove(key)
+          } else {
+            expanded_bundles.set(key, true)
+          }
+          println("ui-action: bundle.toggle \{key}")
+        }
+        25 => {
+          let key = github_client_imgui_take_key()
+          let entries : Array[(String, String?)] = []
+          for item in inbox_items {
+            if @domain.bundle_key(item.repository, item.author) == key &&
+              !@domain.activity_is_read(read_markers, item.url, item.updated_at) {
+              entries.push((item.url, previous_read_at(read_markers, item.url)))
+              read_markers = @domain.mark_activity_read(
+                read_markers,
+                item.url,
+                item.updated_at,
+              )
+            }
+          }
+          save_read_markers()
+          notify(
+            "Marked \{entries.length()} updates as done.",
+            Some(Restore(entries)),
+          )
+          println("ui-action: bundle.done \{key}")
+        }
+        26 =>
+          match undo_op {
+            Some(op) => {
+              undo_op = None
+              apply_undo(op)
+            }
+            None => ()
+          }
+        27 =>
+          match running_job {
+            Some(job) if job.is_cancellable() => {
+              abandon_job()
+              notify("Refresh cancelled. Showing the previous results.", None)
+              println("ui-action: fetch.cancel")
+            }
+            _ => ()
+          }
+        28 => {
+          let key = github_client_imgui_take_key()
+          if key == "retry" ||
+            key == "repositories" ||
+            key == "network" ||
+            key == "forbidden" {
+            dismissed_banners.clear()
+            pending_jobs.push(Credentials(""))
+          } else if key.has_prefix("token:") {
+            model = @domain.update(
+              model,
+              @domain.Msg::Navigate(@domain.Page::Settings),
+            )
+            let scope = key[6:].to_owned()
+            token_prefill = if scope == "default" { "-" } else { scope }
+            token_state = 0
+            token_message = ""
+            token_open_seq += 1
+          } else if key.has_prefix("watch:") {
+            watch_repository(key[6:].to_owned())
+          }
+          println("ui-action: banner.action \{key}")
+        }
+        29 => dismissed_banners.set(github_client_imgui_take_key(), true)
+        30 => token_state = 0
+        31 => notify("Link copied.", None)
+        10 => model = @domain.update(model, @domain.Msg::Navigate(Inbox))
+        11 => model = @domain.update(model, @domain.Msg::Navigate(Repositories))
+        14 => model = @domain.update(model, @domain.Msg::Navigate(Settings))
+        15 => model = @domain.update(model, @domain.Msg::Navigate(ForYou))
+        16 => model = @domain.update(model, @domain.Msg::Navigate(Saved))
+        _ => ()
+      }
+      if action >= 10 && action <= 16 {
+        println("ui-action: nav \{model.page().name()}")
+      }
+      if imgui_auto_refresh_enabled() &&
+        !saved_tokens.is_empty() &&
+        running_job is None &&
+        pending_jobs.is_empty() &&
+        @async.now() >= auto_paused_until_ms &&
+        now - last_auto_refresh >= AUTO_REFRESH_SECONDS {
+        last_auto_refresh = now
+        pending_jobs.push(Auto)
+      }
+      @glfw.swap_buffers(window)
+      // Yield to the async runtime so background fetches make progress.
+      @async.pause()
+    }
+    // A job stuck in a read that ignores cancellation would keep the task
+    // group, and so the process, alive after the window closes.
+    if live_tasks > 0 {
+      github_client_imgui_shutdown()
+      @glfw.destroy_window(window)
+      @glfw.terminate()
+      println("github-client: stopped with a fetch still running")
+      github_client_imgui_exit(0)
+    }
+  })
+  github_client_imgui_shutdown()
   @glfw.destroy_window(window)
   @glfw.terminate()
   println("github-client: stopped")

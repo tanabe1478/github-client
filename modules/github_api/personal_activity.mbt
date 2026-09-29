@@ -108,8 +108,9 @@ async fn list_personal_issues(
 ) -> Result[Array[ActivitySummary], String] {
   let result : Array[ActivitySummary] = []
   for page = 1; page <= 10; page = page + 1 {
-    guard get_json(token, personal_issues_path(filter, page)) is Ok(json) else {
-      return Err("GitHub personal activity could not be loaded")
+    let json = match get_json(token, personal_issues_path(filter, page)) {
+      Ok(json) => json
+      Err(error) => return Err(error)
     }
     guard decode_subscribed_issues(json) is Ok(items) else {
       return Err("GitHub personal activity response could not be decoded")

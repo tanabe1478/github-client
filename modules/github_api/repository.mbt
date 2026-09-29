@@ -54,8 +54,9 @@ pub async fn list_accessible_repositories(
 ) -> Result[Array[RepositorySummary], String] {
   let result : Array[RepositorySummary] = []
   for page = 1; page <= 10; page = page + 1 {
-    guard get_json(token, accessible_repositories_path(page)) is Ok(json) else {
-      return Err("GitHub repository suggestions could not be loaded")
+    let json = match get_json(token, accessible_repositories_path(page)) {
+      Ok(json) => json
+      Err(error) => return Err(error)
     }
     guard decode_repositories(json) is Ok(repositories) else {
       return Err("GitHub repository response could not be decoded")
