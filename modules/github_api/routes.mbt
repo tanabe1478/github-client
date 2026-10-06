@@ -68,6 +68,18 @@ pub fn repository_pulls_path(
 }
 
 ///|
+/// Review comments on any pull request in the repository, updated at or
+/// after `since` (ISO 8601).
+pub fn repository_review_comments_path(
+  owner : String,
+  name : String,
+  since : String,
+  page : Int,
+) -> String {
+  "/repos/\{owner}/\{name}/pulls/comments?sort=updated&direction=desc&since=\{since}&per_page=100&page=\{page}"
+}
+
+///|
 pub fn repository_sbom_path(owner : String, name : String) -> String {
   "/repos/\{owner}/\{name}/dependency-graph/sbom"
 }

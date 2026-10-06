@@ -201,6 +201,22 @@ async fn Session::fetch_personal(
   for scope, message in failures {
     self.errors.push({ source: "token:\{scope}", message, })
   }
+  let mention_failures = @activity_sync.fetch_review_comment_mentions(
+    self.tokens,
+    self.repo_scopes,
+    self.owner_scopes,
+    load_repositories(),
+    @activity_sync.saved_logins(),
+    @activity_sync.utc_days_ago(
+      @async.now(),
+      @activity_sync.REVIEW_MENTION_DAYS,
+    ),
+    lists[2],
+    incomplete=self.incomplete,
+  )
+  for repository, message in mention_failures {
+    self.errors.push({ source: repository, message, })
+  }
   lists
 }
 

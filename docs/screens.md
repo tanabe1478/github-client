@@ -24,6 +24,8 @@ Each row has two lines: the title, and a meta line with `#number`, `@author`, `u
 
 Review requests include requests to the viewer's teams. GitHub removes a team's request once a teammate reviews, so the app remembers every pull request that requested the viewer's review (`review-requests.txt`). When GitHub no longer lists one, the app checks the pull request and keeps it in For you with a `Still needs your review` label (yellow) until the viewer submits a review or the pull request closes or merges. Pending and dismissed reviews do not count.
 
+GitHub's mention filter misses mentions in review comments on pull request diffs. For each watched repository the app also reads review comments updated in the last 30 days (up to 1,000) and labels an open pull request `Mentioned` when one of them mentions a saved account's login. Comments written by that login and team mentions do not count.
+
 Every row has explicit trailing actions: `Open`, `Done` (or `Move to inbox` for done rows), a Save toggle, and a More actions button. The menu holds `Copy link`, `Show only this repository`, and, separated below them, `Unsubscribe`. Row click and double click are not actions.
 
 In Inbox, two or more updates from `dependabot[bot]` or `renovate[bot]` in one repository collapse into one row with `Show N` / `Hide` and `Done all`.

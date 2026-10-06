@@ -471,16 +471,41 @@ async fn main {
     next : Array[Array[@github_api.ActivitySummary]],
   ) -> Array[String] {
     personal_incomplete.clear()
-    @activity_sync.refresh_personal_activity(
-      saved_tokens,
-      next[0],
-      next[1],
-      next[2],
-      next[3],
-      scope_failures,
-      _ => loading_detail = "For you and watched repositories",
-      () => loading_done += 1,
-      incomplete=personal_incomplete,
+    ignore(
+      @async.all([
+        async fn() {
+          @activity_sync.refresh_personal_activity(
+            saved_tokens,
+            next[0],
+            next[1],
+            next[2],
+            next[3],
+            scope_failures,
+            _ => loading_detail = "For you and watched repositories",
+            () => loading_done += 1,
+            incomplete=personal_incomplete,
+          )
+        },
+        async fn() {
+          // Failures are logged; the watched repository fetch reports the
+          // same repositories.
+          ignore(
+            @activity_sync.fetch_review_comment_mentions(
+              saved_tokens,
+              repo_scopes,
+              owner_scopes,
+              model.repositories(),
+              @activity_sync.saved_logins(),
+              @activity_sync.utc_days_ago(
+                @async.now(),
+                @activity_sync.REVIEW_MENTION_DAYS,
+              ),
+              next[2],
+              incomplete=personal_incomplete,
+            ),
+          )
+        },
+      ]),
     )
     let follow_up = @activity_sync.follow_up_review_requests(
       saved_tokens,

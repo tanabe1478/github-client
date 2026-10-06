@@ -46,3 +46,13 @@ test "a review request is kept until the viewer reviews or it closes" {
   assert_false(keeps_review_request(true, ["teammate", "tanabe1478"], logins))
   assert_false(keeps_review_request(false, [], logins))
 }
+
+///|
+test "utc_days_ago formats midnight UTC days before now" {
+  // 2026-10-06T05:30:00Z
+  inspect(utc_days_ago(1791264600000L, 30), content="2026-09-06T00:00:00Z")
+  inspect(utc_days_ago(1791264600000L, 0), content="2026-10-06T00:00:00Z")
+  // 2024-03-01T00:00:00Z crosses a leap day.
+  inspect(utc_days_ago(1709251200000L, 1), content="2024-02-29T00:00:00Z")
+  inspect(utc_days_ago(0L, 0), content="1970-01-01T00:00:00Z")
+}

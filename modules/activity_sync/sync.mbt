@@ -559,3 +559,100 @@ pub async fn follow_up_review_requests(
   }
   { pending, kept_urls: next, }
 }
+
+///|
+/// How far back review comments are read for mentions.
+pub const REVIEW_MENTION_DAYS : Int = 30
+
+///|
+/// Midnight UTC `days` days before `now_ms` (milliseconds since the Unix
+/// epoch), as GitHub's ISO 8601 `since` parameter.
+pub fn utc_days_ago(now_ms : Int64, days : Int) -> String {
+  let day = (now_ms / 86_400_000L).to_int() - days
+  // Civil-from-days (Howard Hinnant), valid for dates after 1970.
+  let z = day + 719468
+  let era = z / 146097
+  let doe = z - era * 146097
+  let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+  let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+  let mp = (5 * doy + 2) / 153
+  let d = doy - (153 * mp + 2) / 5 + 1
+  let m = if mp < 10 { mp + 3 } else { mp - 9 }
+  let y = yoe + era * 400 + (if m <= 2 { 1 } else { 0 })
+  fn pad(value : Int) -> String {
+    if value < 10 {
+      "0\{value}"
+    } else {
+      value.to_string()
+    }
+  }
+
+  "\{y}-\{pad(m)}-\{pad(d)}T00:00:00Z"
+}
+
+///|
+/// Open pull requests in `repositories` whose review comments mention one
+/// of `logins`, appended to `mentions`. GitHub's mention filter misses
+/// these. Failures are returned per repository.
+pub async fn fetch_review_comment_mentions(
+  tokens : Map[String, String],
+  repo_scopes : Map[String, String],
+  owner_scopes : Map[String, String],
+  repositories : Array[@domain.RepositoryRef],
+  logins : Array[String],
+  since : String,
+  mentions : Array[@github_api.ActivitySummary],
+  incomplete? : Map[String, Bool] = Map([]),
+) -> Map[String, String] {
+  let failures : Map[String, String] = Map([])
+  if logins.is_empty() {
+    return failures
+  }
+  let tasks = repositories.map(repository => {
+    async fn() -> Array[@github_api.ActivitySummary] {
+      let owner = repository.owner()
+      let name = repository.name()
+      guard resolve_token(tokens, repo_scopes, owner_scopes, owner, name)
+        is Some(token) else {
+        return []
+      }
+      let listing = match
+        @github_api.list_review_comment_mentions(
+          token, owner, name, since, logins,
+        ) {
+        Ok(listing) => listing
+        Err(error) => {
+          failures.set(repository.key(), error)
+          @github_api.log(
+            "review-comment-mentions: \{repository.key()}: \{error}",
+          )
+          return []
+        }
+      }
+      if !listing.complete {
+        incomplete.set(
+          "For you: review comment mentions in \{repository.key()}",
+          true,
+        )
+      }
+      let found : Array[@github_api.ActivitySummary] = []
+      for number in listing.numbers {
+        match @github_api.get_pull_request_state(token, owner, name, number) {
+          Ok((activity, true)) => found.push(activity)
+          Ok((_, false)) => ()
+          Err(error) =>
+            @github_api.log(
+              "review-comment-mentions: \{repository.key()}#\{number}: \{error}",
+            )
+        }
+      }
+      found
+    }
+  })
+  let results = @async.all(tasks, max_concurrent=6)
+  for found in results {
+    append_unique_activities(mentions, found)
+  }
+  @github_api.log("review-comment-mentions: mentions=\{mentions.length()}")
+  failures
+}
