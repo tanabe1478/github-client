@@ -165,20 +165,35 @@ pub async fn fetch_personal_activity(
   mentions : Array[@github_api.ActivitySummary],
   subscriptions : Array[@github_api.ActivitySummary],
   incomplete? : Map[String, Bool] = Map([]),
+  closed_mentions? : ClosedMentions? = None,
 ) -> String? {
   let errors : Array[String] = []
-  let results = @async.all([
+  let tasks = [
     async fn() { @github_api.search_review_requests(token, login) },
     async fn() { @github_api.search_assignments(token, login) },
     async fn() { @github_api.search_mentions(token, login) },
     async fn() { @github_api.list_subscribed_issues(token) },
-  ])
+  ]
   let targets = [
     (review_requests, "review requests"),
     (assignments, "assignments"),
     (mentions, "mentions"),
     (subscriptions, "subscriptions"),
   ]
+  if closed_mentions is Some(options) {
+    tasks.push(async fn() {
+      match @github_api.list_closed_mentions(token, options.since) {
+        Ok(listing) =>
+          Ok({
+            ..listing,
+            items: listing.items.filter(item => options.keeps(item.state())),
+          })
+        Err(error) => Err(error)
+      }
+    })
+    targets.push((mentions, "closed mentions"))
+  }
+  let results = @async.all(tasks)
   for index, result in results {
     let (target, label) = targets[index]
     match result {
@@ -215,6 +230,7 @@ pub async fn refresh_personal_activity(
   on_start : (String) -> Unit,
   on_done : () -> Unit,
   incomplete? : Map[String, Bool] = Map([]),
+  closed_mentions? : ClosedMentions? = None,
 ) -> Unit {
   // Tokens are fetched concurrently. Appends happen between suspension
   // points, so the shared lists stay consistent.
@@ -225,7 +241,7 @@ pub async fn refresh_personal_activity(
       defer on_done()
       fetch_scope_activity(
         scope, token, review_requests, assignments, mentions, subscriptions, failures,
-        incomplete,
+        incomplete, closed_mentions,
       )
     }
   })
@@ -242,6 +258,7 @@ async fn fetch_scope_activity(
   subscriptions : Array[@github_api.ActivitySummary],
   failures : Map[String, String],
   incomplete : Map[String, Bool],
+  closed_mentions : ClosedMentions?,
 ) -> Unit {
   let login = match @credential_store.load_login_label(scope) {
     Some(login) => login
@@ -266,6 +283,7 @@ async fn fetch_scope_activity(
       mentions,
       subscriptions,
       incomplete~,
+      closed_mentions~,
     ) {
     Some(error) => {
       failures.set(scope, error)
@@ -561,8 +579,39 @@ pub async fn follow_up_review_requests(
 }
 
 ///|
-/// How far back review comments are read for mentions.
-pub const REVIEW_MENTION_DAYS : Int = 30
+/// Which merged or closed items Mentioned lists besides open ones.
+pub(all) struct ClosedMentions {
+  /// Oldest update to include, as GitHub's ISO 8601 `since` parameter.
+  since : String
+  merged : Bool
+  closed : Bool
+}
+
+///|
+pub fn ClosedMentions::keeps(
+  self : ClosedMentions,
+  state : @github_api.ActivityState,
+) -> Bool {
+  match state {
+    Open => true
+    Merged => self.merged
+    Closed => self.closed
+  }
+}
+
+///|
+/// Options for the given flags, or None when Mentioned lists open items only.
+pub fn closed_mentions(
+  since : String,
+  merged~ : Bool,
+  closed~ : Bool,
+) -> ClosedMentions? {
+  if merged || closed {
+    Some({ since, merged, closed, })
+  } else {
+    None
+  }
+}
 
 ///|
 /// Midnight UTC `days` days before `now_ms` (milliseconds since the Unix
@@ -591,9 +640,10 @@ pub fn utc_days_ago(now_ms : Int64, days : Int) -> String {
 }
 
 ///|
-/// Open pull requests in `repositories` whose review comments mention one
-/// of `logins`, appended to `mentions`. GitHub's mention filter misses
-/// these. Failures are returned per repository.
+/// Pull requests in `repositories` whose review comments mention one of
+/// `logins`, appended to `mentions`. GitHub's mention filter misses these.
+/// Merged and closed pull requests are kept only as `closed_mentions` allows.
+/// Failures are returned per repository.
 pub async fn fetch_review_comment_mentions(
   tokens : Map[String, String],
   repo_scopes : Map[String, String],
@@ -603,6 +653,7 @@ pub async fn fetch_review_comment_mentions(
   since : String,
   mentions : Array[@github_api.ActivitySummary],
   incomplete? : Map[String, Bool] = Map([]),
+  closed_mentions? : ClosedMentions? = None,
 ) -> Map[String, String] {
   let failures : Map[String, String] = Map([])
   if logins.is_empty() {
@@ -638,8 +689,13 @@ pub async fn fetch_review_comment_mentions(
       let found : Array[@github_api.ActivitySummary] = []
       for number in listing.numbers {
         match @github_api.get_pull_request_state(token, owner, name, number) {
-          Ok((activity, true)) => found.push(activity)
-          Ok((_, false)) => ()
+          Ok((activity, _)) =>
+            if activity.state() is Open ||
+              closed_mentions
+              .map(options => options.keeps(activity.state()))
+              .unwrap_or(false) {
+              found.push(activity)
+            }
           Err(error) =>
             @github_api.log(
               "review-comment-mentions: \{repository.key()}#\{number}: \{error}",

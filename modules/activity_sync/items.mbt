@@ -54,6 +54,7 @@ pub fn personal_items(
 ) -> Array[@domain.ActivityItem] {
   let items : Array[@domain.ActivityItem] = []
   let indices : Map[String, Int] = Map([])
+  let closed : Map[String, String] = Map([])
   let sources = [
     (review_requests, "Review requested"),
     // GitHub dropped these requests, usually because a teammate reviewed
@@ -83,8 +84,21 @@ pub fn personal_items(
         None => {
           indices.set(url, items.length())
           items.push(activity_item(activity, [reason]))
+          match activity.state() {
+            Merged => closed.set(url, "Merged")
+            Closed => closed.set(url, "Closed")
+            Open => ()
+          }
         }
       }
+    }
+  }
+  // Closed items appear only when settings include closed mentions; the
+  // label tells them apart from open ones.
+  for item in items {
+    match closed.get(item.url) {
+      Some(label) => item.reasons.push(label)
+      None => ()
     }
   }
   items

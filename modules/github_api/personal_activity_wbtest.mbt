@@ -36,3 +36,51 @@ test "subscribed issue response decodes array payload" {
   }
   inspect(items[0].title(), content="Subscribed")
 }
+
+///|
+test "personal activity reports open, closed, and merged states" {
+  let json : Json = [
+    {
+      "number": 1,
+      "title": "Open issue",
+      "html_url": "https://github.com/acme/app/issues/1",
+      "repository_url": "https://api.github.com/repos/acme/app",
+      "user": { "login": "alice" },
+      "updated_at": "2026-10-01T00:00:00Z",
+      "state": "open",
+    },
+    {
+      "number": 2,
+      "title": "Closed issue",
+      "html_url": "https://github.com/acme/app/issues/2",
+      "repository_url": "https://api.github.com/repos/acme/app",
+      "user": { "login": "alice" },
+      "updated_at": "2026-10-01T00:00:00Z",
+      "state": "closed",
+    },
+    {
+      "number": 3,
+      "title": "Merged pull request",
+      "html_url": "https://github.com/acme/app/pull/3",
+      "repository_url": "https://api.github.com/repos/acme/app",
+      "user": { "login": "alice" },
+      "updated_at": "2026-10-01T00:00:00Z",
+      "state": "closed",
+      "pull_request": { "merged_at": "2026-10-01T00:00:00Z" },
+    },
+    {
+      "number": 4,
+      "title": "Closed pull request",
+      "html_url": "https://github.com/acme/app/pull/4",
+      "repository_url": "https://api.github.com/repos/acme/app",
+      "user": { "login": "alice" },
+      "updated_at": "2026-10-01T00:00:00Z",
+      "state": "closed",
+      "pull_request": { "merged_at": null },
+    },
+  ]
+  guard decode_subscribed_issues(json) is Ok(items) else {
+    fail("issues should decode")
+  }
+  assert_eq(items.map(item => item.state()), [Open, Closed, Merged, Closed])
+}

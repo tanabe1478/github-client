@@ -13,6 +13,7 @@ tanabe1478/github-client (desktop and command-line composition roots)
   ├── github-client-repository-store ──> github-client-app-paths
   │                                   └─> github-client-domain
   ├── github-client-review-request-store ──> github-client-app-paths
+  ├── github-client-settings-store ──> github-client-app-paths
   └── github-client-read-state-store ──> github-client-app-paths
                                       └─> github-client-domain
 ```
@@ -46,6 +47,10 @@ PATをOS-backed storageで暗号化し、暗号文だけをfilesystemへ保存�
 ### `modules/review_request_store`
 
 viewerにreviewを依頼したpull requestのURLをfilesystemへ保存する。GitHubがteamへの依頼を外したあとも、viewerがreviewするかpull requestが閉じるまでFor youに残すために使う。`app_paths`のみを参照する。
+
+### `modules/settings_store`
+
+ユーザー設定を`settings.txt`へ保存する。人やAIが直接編集できるよう、コメント付きの`key = value`形式にする。`app_paths`のみを参照する。
 
 ### `modules/read_state_store`
 

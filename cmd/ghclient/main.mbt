@@ -187,6 +187,19 @@ async fn Session::fetch_personal(
 ) -> Array[Array[@github_api.ActivitySummary]] {
   let lists = [[], [], [], []]
   let failures : Map[String, String] = Map([])
+  let settings = match @settings_store.load_default() {
+    Ok(settings) => settings
+    Err(message) => {
+      self.errors.push({ source: "settings", message, })
+      @settings_store.default_settings()
+    }
+  }
+  let since = @activity_sync.utc_days_ago(@async.now(), settings.mention_days)
+  let closed_mentions = @activity_sync.closed_mentions(
+    since,
+    merged=settings.include_merged_mentions,
+    closed=settings.include_closed_mentions,
+  )
   @activity_sync.refresh_personal_activity(
     self.tokens,
     lists[0],
@@ -197,6 +210,7 @@ async fn Session::fetch_personal(
     _ => (),
     () => (),
     incomplete=self.incomplete,
+    closed_mentions~,
   )
   for scope, message in failures {
     self.errors.push({ source: "token:\{scope}", message, })
@@ -207,12 +221,10 @@ async fn Session::fetch_personal(
     self.owner_scopes,
     load_repositories(),
     @activity_sync.saved_logins(),
-    @activity_sync.utc_days_ago(
-      @async.now(),
-      @activity_sync.REVIEW_MENTION_DAYS,
-    ),
+    since,
     lists[2],
     incomplete=self.incomplete,
+    closed_mentions~,
   )
   for repository, message in mention_failures {
     self.errors.push({ source: repository, message, })

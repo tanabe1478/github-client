@@ -17,6 +17,16 @@ pub fn personal_issues_path(filter : String, page : Int) -> String {
 }
 
 ///|
+/// Closed personal issues and pull requests updated at or after `since`.
+pub fn closed_personal_issues_path(
+  filter : String,
+  since : String,
+  page : Int,
+) -> String {
+  "/issues?filter=\{filter}&state=closed&since=\{since}&sort=updated&direction=desc&per_page=100&page=\{page}"
+}
+
+///|
 pub fn review_requests_search_path(login : String, page : Int) -> String {
   "/search/issues?q=is%3Aopen+is%3Apr+review-requested%3A\{login}&sort=updated&order=desc&per_page=100&page=\{page}"
 }

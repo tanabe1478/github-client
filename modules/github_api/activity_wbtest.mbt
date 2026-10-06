@@ -54,10 +54,11 @@ test "decode_pull_request_state reports merged pull requests as not open" {
     "state": "closed",
     "merged": true,
   }
-  guard decode_pull_request_state(json, "owner/app") is Ok((_, open)) else {
+  guard decode_pull_request_state(json, "owner/app") is Ok((activity, open)) else {
     fail("expected a pull request")
   }
   assert_false(open)
+  assert_eq(activity.state(), Merged)
 }
 
 ///|

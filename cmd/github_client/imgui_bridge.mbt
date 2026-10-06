@@ -50,6 +50,11 @@ extern "C" fn github_client_imgui_take_selected_credential() -> String = "github
 extern "C" fn github_client_imgui_take_key() -> String = "github_client_imgui_take_key"
 
 ///|
+/// Mention settings from the Settings page: bit 0 merged, bit 1 closed,
+/// days from bit 8.
+extern "C" fn github_client_imgui_take_settings() -> Int = "github_client_imgui_take_settings"
+
+///|
 extern "C" fn github_client_imgui_view_kind() -> Int = "github_client_imgui_view_kind"
 
 ///|

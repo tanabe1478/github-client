@@ -236,6 +236,13 @@ async fn main {
     }
     Err(error) => println("triage-store: load failed: \{error}")
   }
+  let mut settings = match @settings_store.load_default() {
+    Ok(settings) => settings
+    Err(error) => {
+      println("settings-store: load failed: \{error}")
+      @settings_store.default_settings()
+    }
+  }
   let mut authenticated_login = ""
   let saved_tokens : Map[String, String] = Map([])
   let repo_scopes : Map[String, String] = Map([])
@@ -364,6 +371,7 @@ async fn main {
   let read_state_path = @app_paths.data_file("read-state.txt").unwrap_or("")
   let triage_path = @app_paths.data_file("triage.txt").unwrap_or("")
   let repositories_path = @app_paths.data_file("repositories.txt").unwrap_or("")
+  let settings_path = @app_paths.data_file("settings.txt").unwrap_or("")
   fn read_text(path : String) -> String {
     if path == "" || !@fs.path_exists(path) {
       return ""
@@ -376,10 +384,12 @@ async fn main {
   let mut known_read_state = read_text(read_state_path)
   let mut known_triage = read_text(triage_path)
   let mut known_repositories = read_text(repositories_path)
+  let mut known_settings = read_text(settings_path)
   fn remember_files() -> Unit {
     known_read_state = read_text(read_state_path)
     known_triage = read_text(triage_path)
     known_repositories = read_text(repositories_path)
+    known_settings = read_text(settings_path)
   }
 
   fn save_read_markers() -> Unit {
@@ -471,6 +481,12 @@ async fn main {
     next : Array[Array[@github_api.ActivitySummary]],
   ) -> Array[String] {
     personal_incomplete.clear()
+    let since = @activity_sync.utc_days_ago(@async.now(), settings.mention_days)
+    let closed_mentions = @activity_sync.closed_mentions(
+      since,
+      merged=settings.include_merged_mentions,
+      closed=settings.include_closed_mentions,
+    )
     ignore(
       @async.all([
         async fn() {
@@ -484,6 +500,7 @@ async fn main {
             _ => loading_detail = "For you and watched repositories",
             () => loading_done += 1,
             incomplete=personal_incomplete,
+            closed_mentions~,
           )
         },
         async fn() {
@@ -496,12 +513,10 @@ async fn main {
               owner_scopes,
               model.repositories(),
               @activity_sync.saved_logins(),
-              @activity_sync.utc_days_ago(
-                @async.now(),
-                @activity_sync.REVIEW_MENTION_DAYS,
-              ),
+              since,
               next[2],
               incomplete=personal_incomplete,
+              closed_mentions~,
             ),
           )
         },
@@ -997,6 +1012,23 @@ async fn main {
             Err(error) => println("store: repositories reload failed: \{error}")
           }
         }
+        let settings_text = read_text(settings_path)
+        if settings_text != known_settings {
+          known_settings = settings_text
+          match @settings_store.decode(settings_text) {
+            Ok(next) => {
+              println("store: settings changed outside the app")
+              if next != settings {
+                settings = next
+                if !saved_tokens.is_empty() {
+                  pending_jobs.push(Personal)
+                }
+              }
+            }
+            // The previous settings stay in effect until the file is fixed.
+            Err(error) => println("store: settings reload failed: \{error}")
+          }
+        }
       }
       if running_job is None && !pending_jobs.is_empty() {
         let job = pending_jobs.remove(0)
@@ -1266,7 +1298,10 @@ async fn main {
       }
       let has_credentials = !@credential_store.list_scopes().is_empty()
       let flags = (if has_credentials { 1 } else { 0 }) |
-        (if cancellable { 2 } else { 0 })
+        (if cancellable { 2 } else { 0 }) |
+        (if settings.include_merged_mentions { 4 } else { 0 }) |
+        (if settings.include_closed_mentions { 8 } else { 0 }) |
+        (settings.mention_days << 8)
       let rows_built = if profiling { github_client_imgui_clock() } else { 0.0 }
       let action = github_client_imgui_render(
         window,
@@ -1551,6 +1586,32 @@ async fn main {
         10 => model = @domain.update(model, @domain.Msg::Navigate(Inbox))
         11 => model = @domain.update(model, @domain.Msg::Navigate(Repositories))
         14 => model = @domain.update(model, @domain.Msg::Navigate(Settings))
+        33 => {
+          let packed = github_client_imgui_take_settings()
+          let next : @settings_store.Settings = {
+            include_merged_mentions: (packed & 1) != 0,
+            include_closed_mentions: (packed & 2) != 0,
+            mention_days: packed >> 8,
+          }
+          if next != settings {
+            match @settings_store.save_default(next) {
+              Ok(_) => {
+                settings = next
+                remember_files()
+                if !saved_tokens.is_empty() {
+                  pending_jobs.push(Personal)
+                }
+                println(
+                  "ui-action: settings merged=\{next.include_merged_mentions} closed=\{next.include_closed_mentions} days=\{next.mention_days}",
+                )
+              }
+              Err(error) => {
+                notify("Couldn't save settings.", None)
+                println("settings-store: save failed: \{error}")
+              }
+            }
+          }
+        }
         15 => model = @domain.update(model, @domain.Msg::Navigate(ForYou))
         16 => model = @domain.update(model, @domain.Msg::Navigate(Saved))
         _ => ()

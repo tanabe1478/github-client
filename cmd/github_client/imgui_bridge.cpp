@@ -606,6 +606,11 @@ static std::string gc_selected_repository;
 static std::string gc_selected_credential;
 static std::string gc_selected_key;
 static std::string gc_watch_request;
+// Mention settings edited on the Settings page, packed as in the frame
+// flags: bit 0 merged, bit 1 closed, days from bit 8.
+static int gc_settings_request = 0;
+static bool gc_days_editing = false;
+static int gc_days_input = 30;
 
 static std::string gc_menu_url;
 static std::string gc_menu_repository;
@@ -639,6 +644,9 @@ struct GcFrame {
   int progress_total = 0;
   bool has_credentials = false;
   bool cancellable = false;
+  bool include_merged_mentions = false;
+  bool include_closed_mentions = false;
+  int mention_days = 30;
   std::vector<std::string> nav;
   std::vector<std::string> header;
   std::vector<std::vector<std::string>> rows;
@@ -1346,9 +1354,46 @@ static int gc_render_settings(const GcFrame& frame, float width) {
   gc_text(draw, gc_font_regular, 12.0f, ImVec2(pos.x + 46.0f, pos.y + 90.0f), GC_MUTED,
           "Refreshes in the background without blocking the window. New or updated items post a notification.");
   pos.y += sync_h + 20.0f;
+  const float for_you_h = 212.0f;
+  gc_card_frame(draw, pos, card_w, for_you_h, 48.0f, "Mentions");
+  // The settings live in settings.txt; MoonBit saves an edit and passes
+  // the stored values back in the next frame.
+  bool include_merged = frame.include_merged_mentions;
+  bool include_closed = frame.include_closed_mentions;
+  if (!gc_days_editing) gc_days_input = frame.mention_days;
+  int days = gc_days_input;
+  bool changed = false;
+  gc_font(gc_font_bold, GC_BODY);
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(3.0f, 3.0f));
+  ImGui::SetCursorScreenPos(ImVec2(pos.x + 16.0f, pos.y + 62.0f));
+  changed |= ImGui::Checkbox("Include merged pull requests##settings.include-merged-mentions", &include_merged);
+  ImGui::SetCursorScreenPos(ImVec2(pos.x + 16.0f, pos.y + 96.0f));
+  changed |= ImGui::Checkbox("Include closed issues and pull requests##settings.include-closed-mentions", &include_closed);
+  ImGui::PopStyleVar();
+  gc_pop_font();
+  gc_text(draw, gc_font_regular, GC_BODY, ImVec2(pos.x + 20.0f, pos.y + 140.0f), GC_FG, "Look back");
+  ImGui::SetCursorScreenPos(ImVec2(pos.x + 100.0f, pos.y + 134.0f));
+  gc_font(gc_font_regular, 13.0f);
+  ImGui::SetNextItemWidth(132.0f);
+  ImGui::InputInt("##settings.mention-days", &days, 1, 7);
+  gc_days_input = ImClamp(days, 1, 365);
+  gc_days_editing = ImGui::IsItemActive();
+  // Typing commits when the field loses focus; the step buttons commit at once.
+  if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+  gc_pop_font();
+  gc_text(draw, gc_font_regular, GC_BODY, ImVec2(pos.x + 244.0f, pos.y + 140.0f), GC_FG, "days (1 to 365)");
+  gc_text(draw, gc_font_regular, 12.0f, ImVec2(pos.x + 20.0f, pos.y + 176.0f), GC_MUTED,
+          "Mentioned lists open items. Checked kinds updated within the look-back are added, labeled Merged or Closed.");
+  gc_text(draw, gc_font_regular, 12.0f, ImVec2(pos.x + 20.0f, pos.y + 192.0f), GC_MUTED,
+          "Review comments are read for mentions over the same period.");
+  if (changed) {
+    gc_settings_request = (include_merged ? 1 : 0) | (include_closed ? 2 : 0) | (gc_days_input << 8);
+    action = 33;
+  }
+  pos.y += for_you_h + 20.0f;
   const float data_h = 104.0f;
   gc_card_frame(draw, pos, card_w, data_h, 48.0f, "Local data");
-  gc_text(draw, gc_font_regular, 13.0f, ImVec2(pos.x + 20.0f, pos.y + 58.0f), GC_MUTED, "Watched repositories, done state, and saved items are stored in");
+  gc_text(draw, gc_font_regular, 13.0f, ImVec2(pos.x + 20.0f, pos.y + 58.0f), GC_MUTED, "Watched repositories, done state, saved items, and settings (settings.txt) are stored in");
   gc_text(draw, gc_font_mono, 12.0f, ImVec2(pos.x + 20.0f, pos.y + 78.0f), GC_FG, gc_field(frame.nav, 4));
   ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + data_h + 16.0f));
   ImGui::Dummy(ImVec2(card_w, 1.0f));
@@ -1695,6 +1740,9 @@ extern "C" int github_client_imgui_render(
   frame.progress_total = progress_total;
   frame.has_credentials = (flags & 1) != 0;
   frame.cancellable = (flags & 2) != 0;
+  frame.include_merged_mentions = (flags & 4) != 0;
+  frame.include_closed_mentions = (flags & 8) != 0;
+  frame.mention_days = flags >> 8;
   frame.nav = gc_fields(nav_text);
   frame.header = gc_fields(header_text);
   frame.rows = gc_lines(rows_text);
@@ -1762,7 +1810,12 @@ extern "C" int github_client_imgui_render(
   }
   int page_action = 0;
   if (page == 1) page_action = gc_render_repositories(frame, content_w);
-  else if (page == 4) page_action = gc_render_settings(frame, content_w);
+  else if (page == 4) {
+    // Settings can be taller than the window, so it scrolls on its own.
+    ImGui::BeginChild("##settings.scroll", ImVec2(content_w, ImGui::GetContentRegionAvail().y), ImGuiChildFlags_None);
+    page_action = gc_render_settings(frame, ImGui::GetContentRegionAvail().x);
+    ImGui::EndChild();
+  }
   else page_action = gc_render_activity_page(frame, content_w, now);
   if (page_action) action = page_action;
   ImGui::EndChild();
@@ -1782,6 +1835,10 @@ extern "C" int github_client_imgui_render(
   overlay = gc_render_loading_dialog(frame, now);
   if (overlay) action = overlay;
 
+  // Cmd+, on macOS (ImGui maps Cmd to Ctrl there), Ctrl+, elsewhere.
+  const bool settings_shortcut = ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Comma, ImGuiInputFlags_RouteGlobal);
+  if (settings_shortcut && action == 0 && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) action = 14;
+
   ImGui::Render();
   int width = 0, height = 0;
   glfwGetFramebufferSize(window, &width, &height);
@@ -1794,6 +1851,12 @@ extern "C" int github_client_imgui_render(
 
 // ---------------------------------------------------------------------------
 // Values staged by the last action, and view state read by MoonBit
+
+extern "C" int github_client_imgui_take_settings(void) {
+  const int value = gc_settings_request;
+  gc_settings_request = 0;
+  return value;
+}
 
 extern "C" moonbit_string_t github_client_imgui_take_repository(void) {
   const std::string value = gc_watch_request;

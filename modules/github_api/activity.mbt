@@ -13,6 +13,7 @@ struct IssueWire {
   html_url : String
   user : ApiUser
   updated_at : String
+  state : String?
   pull_request : Json?
 } derive(FromJson)
 
@@ -39,6 +40,26 @@ pub(all) enum ActivityKind {
 }
 
 ///|
+pub(all) enum ActivityState {
+  Open
+  Closed
+  Merged
+} derive(Eq, Debug)
+
+///|
+/// The state from an issue payload's `state` and its `pull_request`
+/// object, whose `merged_at` is set once a pull request merges.
+fn issue_state(state : String?, pull_request : Json?) -> ActivityState {
+  if state != Some("closed") {
+    return Open
+  }
+  match pull_request {
+    Some(Object(fields)) if fields.get("merged_at") is Some(String(_)) => Merged
+    _ => Closed
+  }
+}
+
+///|
 pub struct ActivitySummary {
   repository : String
   number : Int
@@ -48,6 +69,7 @@ pub struct ActivitySummary {
   updated_at : String
   kind : ActivityKind
   draft : Bool
+  state : ActivityState
 }
 
 ///|
@@ -91,6 +113,11 @@ pub fn ActivitySummary::is_draft(self : ActivitySummary) -> Bool {
 }
 
 ///|
+pub fn ActivitySummary::state(self : ActivitySummary) -> ActivityState {
+  self.state
+}
+
+///|
 pub fn decode_issues(
   json : Json,
   repository : String,
@@ -109,6 +136,7 @@ pub fn decode_issues(
           updated_at: item.updated_at,
           kind: Issue,
           draft: false,
+          state: Open,
         })
       }
     }
@@ -135,6 +163,7 @@ pub fn decode_pull_requests(
         updated_at: item.updated_at,
         kind: PullRequest,
         draft: item.draft,
+        state: Open,
       }),
     )
   } catch {
@@ -198,6 +227,7 @@ pub fn decode_activity(
         Issue
       },
       draft: false,
+      state: issue_state(item.state, item.pull_request),
     })
   } catch {
     _ => Err("GitHub issue response could not be decoded")
@@ -252,6 +282,13 @@ pub fn decode_pull_request_state(
           updated_at: item.updated_at,
           kind: PullRequest,
           draft: item.draft,
+          state: if item.merged {
+            Merged
+          } else if item.state == "open" {
+            Open
+          } else {
+            Closed
+          },
         },
         item.state == "open" && !item.merged,
       ),

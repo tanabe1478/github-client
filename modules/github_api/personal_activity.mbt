@@ -6,6 +6,7 @@ struct PersonalActivityWire {
   repository_url : String
   user : ApiUser
   updated_at : String
+  state : String?
   pull_request : Json?
 } derive(FromJson)
 
@@ -49,6 +50,7 @@ fn personal_activity_from_wire(
       Issue
     },
     draft: false,
+    state: issue_state(item.state, item.pull_request),
   })
 }
 
@@ -123,6 +125,22 @@ pub async fn search_mentions(
   _login : String,
 ) -> Result[Listing, String] {
   list_personal_issues(token, "mentioned")
+}
+
+///|
+/// Closed or merged issues and pull requests mentioning the viewer that
+/// were updated at or after `since`, up to 1,000.
+pub async fn list_closed_mentions(
+  token : String,
+  since : String,
+) -> Result[Listing, String] {
+  get_all_pages(
+    token,
+    page => closed_personal_issues_path("mentioned", since, page),
+    10,
+    decode_subscribed_issues,
+    json_array_length,
+  )
 }
 
 ///|

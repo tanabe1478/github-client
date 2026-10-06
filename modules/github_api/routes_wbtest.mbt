@@ -10,6 +10,10 @@ test "routes cover only the product API surface" {
     content="/issues?filter=mentioned&state=open&sort=updated&direction=desc&per_page=100&page=2",
   )
   inspect(
+    closed_personal_issues_path("mentioned", "2026-09-06T00:00:00Z", 1),
+    content="/issues?filter=mentioned&state=closed&since=2026-09-06T00:00:00Z&sort=updated&direction=desc&per_page=100&page=1",
+  )
+  inspect(
     review_requests_search_path("octocat", 2),
     content="/search/issues?q=is%3Aopen+is%3Apr+review-requested%3Aoctocat&sort=updated&order=desc&per_page=100&page=2",
   )

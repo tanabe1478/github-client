@@ -8,7 +8,7 @@ Repository code is the source of truth for behavior, accessibility, security, pl
 | `for-you` | For you | Review requests, assignments, mentions, and subscriptions from watched repositories, merged across every saved credential and deduplicated by activity URL, with a reason filter |
 | `saved` | Saved | Activities saved for later, kept independently of their done state |
 | `repositories` | Repositories | Watch by name, watch from account suggestions, and unwatch |
-| `settings` | Settings | Personal access tokens (default and owner/organization scopes), auto refresh, and the local data location |
+| `settings` | Settings | Personal access tokens (default and owner/organization scopes), auto refresh, which merged or closed mentions to include and how many days back, and the local data location. The page scrolls when it is taller than the window. Cmd+, (Ctrl+, on Windows) opens it while no dialog is open |
 | `onboarding` | First launch | Shown on activity pages while no token is saved: connect GitHub, then watch repositories |
 | `pat-dialog` | Personal access token dialog | Add or replace a token; verifies it with GitHub before saving |
 | `credential-confirm` | Remove token dialog | Confirms removing a token, which cannot be undone |
@@ -24,7 +24,9 @@ Each row has two lines: the title, and a meta line with `#number`, `@author`, `u
 
 Review requests include requests to the viewer's teams. GitHub removes a team's request once a teammate reviews, so the app remembers every pull request that requested the viewer's review (`review-requests.txt`). When GitHub no longer lists one, the app checks the pull request and keeps it in For you with a `Still needs your review` label (yellow) until the viewer submits a review or the pull request closes or merges. Pending and dismissed reviews do not count.
 
-GitHub's mention filter misses mentions in review comments on pull request diffs. For each watched repository the app also reads review comments updated in the last 30 days (up to 1,000) and labels an open pull request `Mentioned` when one of them mentions a saved account's login. Comments written by that login and team mentions do not count.
+GitHub's mention filter misses mentions in review comments on pull request diffs. For each watched repository the app also reads review comments updated within the Settings look-back (30 days by default, up to 1,000 comments) and labels the pull request `Mentioned` when one of them mentions a saved account's login. Comments written by that login and team mentions do not count.
+
+Mentioned lists open items only by default. In Settings, `Include merged pull requests` and `Include closed issues and pull requests` add those kinds when they were updated within the look-back (`mentions.include_merged`, `mentions.include_closed`, and `mentions.days` in `settings.txt`, see `docs/cli.md`). They come from both the mention filter and review comments and carry a neutral `Merged` or `Closed` label after their reasons. A typed look-back applies when the field loses focus; the step buttons apply at once.
 
 Every row has explicit trailing actions: `Open`, `Done` (or `Move to inbox` for done rows), a Save toggle, and a More actions button. The menu holds `Copy link`, `Show only this repository`, and, separated below them, `Unsubscribe`. Row click and double click are not actions.
 

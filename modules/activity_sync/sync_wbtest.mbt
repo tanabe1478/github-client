@@ -56,3 +56,27 @@ test "utc_days_ago formats midnight UTC days before now" {
   inspect(utc_days_ago(1709251200000L, 1), content="2024-02-29T00:00:00Z")
   inspect(utc_days_ago(0L, 0), content="1970-01-01T00:00:00Z")
 }
+
+///|
+test "closed_mentions keeps open items and only the chosen closed states" {
+  inspect(
+    closed_mentions("2026-09-06T00:00:00Z", merged=false, closed=false) is None,
+    content="true",
+  )
+  guard closed_mentions("2026-09-06T00:00:00Z", merged=true, closed=false)
+    is Some(merged_only) else {
+    fail("merged should enable closed mentions")
+  }
+  assert_eq(
+    [@github_api.Open, Merged, Closed].map(state => merged_only.keeps(state)),
+    [true, true, false],
+  )
+  guard closed_mentions("2026-09-06T00:00:00Z", merged=false, closed=true)
+    is Some(closed_only) else {
+    fail("closed should enable closed mentions")
+  }
+  assert_eq(
+    [@github_api.Open, Merged, Closed].map(state => closed_only.keeps(state)),
+    [true, false, true],
+  )
+}

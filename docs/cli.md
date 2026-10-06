@@ -21,6 +21,18 @@ Install it on macOS with `scripts/macos/install-cli.sh` (default destination `~/
 
 Activity commands fetch from GitHub on every call and hide done items unless `--all` is given. `--query` matches the title, `#number`, or `@author`, as the app's filter does. Reasons are `Review requested`, `Assigned`, `Mentioned`, and `Subscribed`. A review request GitHub removed after a teammate reviewed for the team stays until you review or the pull request closes; it carries both `Review requested` and `Still needs your review`. `for-you` shares that list with the app (`review-requests.txt`). Item URLs are `https://github.com/OWNER/NAME/pull/N` or `.../issues/N`.
 
+## Settings
+
+Settings live in `settings.txt` in the app's data directory (`~/.config/moonbit-github-client/settings.txt` on macOS). The Settings page in the app writes the same file, and the file is meant to be edited by hand or by AI agents: one `key = value` per line, `#` starts a comment, and a missing file or key means the default.
+
+| Key | Values | Default | Effect |
+|---|---|---|---|
+| `mentions.include_merged` | `true`, `false` | `false` | `Mentioned` in For you also lists merged pull requests updated within `mentions.days`, labeled `Merged` |
+| `mentions.include_closed` | `true`, `false` | `false` | `Mentioned` also lists issues and pull requests closed without merging and updated within `mentions.days`, labeled `Closed` |
+| `mentions.days` | `1` to `365` | `30` | How many days back review comments are read for mentions, and how recently a merged or closed item must have been updated |
+
+A running app picks up a change within a few seconds and refreshes For you; `ghclient` reads the file on every command. An unknown key or an invalid value is an error: the app keeps its previous settings and logs it, and `ghclient` reports it under `settings` and uses the defaults.
+
 `done` fetches the item first, so a later update on GitHub makes it unread again, as in the app. The other triage commands only change local files.
 
 ## Output

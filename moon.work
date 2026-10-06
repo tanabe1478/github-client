@@ -9,5 +9,6 @@ members = [
   "modules/review_request_store",
   "modules/read_state_store",
   "modules/triage_store",
+  "modules/settings_store",
   "vendor/glfw-mbt",
 ]
