@@ -704,7 +704,7 @@ static int gc_render_nav(const GcFrame& frame, float height) {
   gc_text(draw, gc_font_bold, 13.0f, ImVec2(origin.x + 26.0f, origin.y + 28.0f), GC_WHITE, "GH");
   gc_text(draw, gc_font_bold, GC_BODY, ImVec2(origin.x + 62.0f, origin.y + 18.0f), GC_FG, "GitHub Client");
   const std::string login = gc_field(frame.nav, 3);
-  gc_text(draw, gc_font_regular, 12.0f, ImVec2(origin.x + 62.0f, origin.y + 38.0f), GC_MUTED, login.empty() ? std::string("Not connected") : ("@" + login));
+  gc_text_ellipsis(gc_font_regular, 12.0f, ImVec2(origin.x + 62.0f, origin.y + 38.0f), origin.x + 220.0f, GC_MUTED, login.empty() ? std::string("Not connected") : ("@" + login));
   const int page = frame.page;
   float y = 76.0f;
   auto place = [&]() { ImGui::SetCursorPos(ImVec2(12.0f, y)); y += 42.0f; };
@@ -919,7 +919,7 @@ static void gc_render_group(const std::vector<std::string>& r, float width) {
   draw->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + 40.0f), GC_CANVAS);
   draw->AddLine(ImVec2(pos.x, pos.y + 39.0f), ImVec2(pos.x + width, pos.y + 39.0f), GC_BORDER_MUTED);
   gc_icon(draw, GC_ICON_REPO, ImVec2(pos.x + 20.0f, pos.y + 12.0f), 16.0f, GC_MUTED);
-  gc_text(draw, gc_font_bold, 13.0f, ImVec2(pos.x + 44.0f, pos.y + 12.0f), GC_FG, gc_field(r, 1));
+  gc_text_ellipsis(gc_font_bold, 13.0f, ImVec2(pos.x + 44.0f, pos.y + 12.0f), pos.x + width - 20.0f, GC_FG, gc_field(r, 1));
   ImGui::Dummy(ImVec2(width, 40.0f));
 }
 
@@ -928,10 +928,11 @@ static ImVec2 gc_empty_state(float width, GcIcon icon, ImU32 icon_color, const s
   ImDrawList* draw = ImGui::GetWindowDrawList();
   const float cx = pos.x + width * 0.5f;
   gc_icon(draw, icon, ImVec2(cx - 16.0f, pos.y + 48.0f), 32.0f, icon_color);
-  const float tw = gc_text_size(gc_font_bold, 16.0f, title).x;
-  gc_text(draw, gc_font_bold, 16.0f, ImVec2(cx - tw * 0.5f, pos.y + 92.0f), GC_FG, title);
-  const float bw = gc_text_size(gc_font_regular, 13.0f, body).x;
-  gc_text(draw, gc_font_regular, 13.0f, ImVec2(cx - bw * 0.5f, pos.y + 118.0f), GC_MUTED, body);
+  const float max_w = ImMax(0.0f, width - 48.0f);
+  const float tw = ImMin(max_w, gc_text_size(gc_font_bold, 16.0f, title).x);
+  gc_text_ellipsis(gc_font_bold, 16.0f, ImVec2(cx - tw * 0.5f, pos.y + 92.0f), cx + max_w * 0.5f, GC_FG, title);
+  const float bw = ImMin(max_w, gc_text_size(gc_font_regular, 13.0f, body).x);
+  gc_text_ellipsis(gc_font_regular, 13.0f, ImVec2(cx - bw * 0.5f, pos.y + 118.0f), cx + max_w * 0.5f, GC_MUTED, body);
   ImGui::Dummy(ImVec2(width, 196.0f));
   return ImVec2(cx, pos.y + 150.0f);
 }
@@ -1117,7 +1118,7 @@ static int gc_render_activity_page(const GcFrame& frame, float width, double now
       std::snprintf(progress, sizeof(progress), "  \xC2\xB7  step %d of %d", ImMin(frame.progress_done + 1, frame.progress_total), frame.progress_total);
       step += progress;
     }
-    gc_text(draw, gc_font_regular, 13.0f, ImVec2(p.x + pad, p.y + 30.0f), GC_MUTED, step);
+    gc_text_ellipsis(gc_font_regular, 13.0f, ImVec2(p.x + pad, p.y + 30.0f), p.x + list_w - pad, GC_MUTED, step);
     gc_skeleton_rows(draw, ImVec2(p.x, p.y + 56.0f), list_w, 6);
     ImGui::Dummy(ImVec2(list_w, 420.0f));
   } else if (!gc_field(frame.page_error, 0).empty()) {
@@ -1320,13 +1321,13 @@ static int gc_render_settings(const GcFrame& frame, float width) {
       gc_icon(draw, GC_ICON_LOCK, ImVec2(avatar.x - 8.0f, avatar.y - 8.0f), 16.0f, GC_DANGER);
     }
     const std::string label = scope == "default" ? "Default" : scope;
-    gc_text(draw, gc_font_bold, GC_BODY, ImVec2(pos.x + 64.0f, y + 11.0f), GC_FG, label);
+    const float buttons_x = pos.x + card_w - 20.0f - 88.0f - (error.empty() ? 0.0f : 96.0f);
+    gc_text_ellipsis(gc_font_bold, GC_BODY, ImVec2(pos.x + 64.0f, y + 11.0f), buttons_x - 12.0f, GC_FG, label);
     if (scope == "default") {
       gc_pill(draw, ImVec2(pos.x + 72.0f + gc_text_size(gc_font_bold, GC_BODY, label).x, y + 10.0f), "All other repositories", GC_MUTED, GC_WHITE, GC_BORDER);
     }
-    const float buttons_x = pos.x + card_w - 20.0f - 88.0f - (error.empty() ? 0.0f : 96.0f);
     if (error.empty()) {
-      gc_text(draw, gc_font_regular, 12.0f, ImVec2(pos.x + 64.0f, y + 34.0f), GC_MUTED, login.empty() ? std::string("Not verified yet") : ("Signed in as @" + login));
+      gc_text_ellipsis(gc_font_regular, 12.0f, ImVec2(pos.x + 64.0f, y + 34.0f), buttons_x - 12.0f, GC_MUTED, login.empty() ? std::string("Not verified yet") : ("Signed in as @" + login));
     } else {
       gc_text_ellipsis(gc_font_regular, 12.0f, ImVec2(pos.x + 64.0f, y + 34.0f), buttons_x - 12.0f, GC_DANGER, error);
     }
@@ -1394,7 +1395,7 @@ static int gc_render_settings(const GcFrame& frame, float width) {
   const float data_h = 104.0f;
   gc_card_frame(draw, pos, card_w, data_h, 48.0f, "Local data");
   gc_text(draw, gc_font_regular, 13.0f, ImVec2(pos.x + 20.0f, pos.y + 58.0f), GC_MUTED, "Watched repositories, done state, saved items, and settings (settings.txt) are stored in");
-  gc_text(draw, gc_font_mono, 12.0f, ImVec2(pos.x + 20.0f, pos.y + 78.0f), GC_FG, gc_field(frame.nav, 4));
+  gc_text_ellipsis(gc_font_mono, 12.0f, ImVec2(pos.x + 20.0f, pos.y + 78.0f), pos.x + card_w - 20.0f, GC_FG, gc_field(frame.nav, 4));
   ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + data_h + 16.0f));
   ImGui::Dummy(ImVec2(card_w, 1.0f));
   return action;
@@ -1560,7 +1561,7 @@ static int gc_render_confirm_remove() {
   gc_center_next_window(420.0f);
   if (ImGui::BeginPopupModal(id, nullptr, GC_DIALOG_FLAGS)) {
     gc_font(gc_font_bold, 16.0f);
-    ImGui::Text("Remove the %s token?", gc_confirm_scope.c_str());
+    ImGui::TextWrapped("Remove the %s token?", gc_confirm_scope.c_str());
     gc_pop_font();
     gc_font(gc_font_regular, 13.0f);
     ImGui::PushStyleColor(ImGuiCol_Text, GC_MUTED);
@@ -1595,7 +1596,7 @@ static int gc_render_alert(const GcFrame& frame) {
   gc_center_next_window(400.0f);
   if (ImGui::BeginPopupModal(id, nullptr, GC_DIALOG_FLAGS)) {
     gc_font(gc_font_bold, 16.0f);
-    ImGui::TextUnformatted(gc_field(frame.alert, 1).c_str());
+    ImGui::TextWrapped("%s", gc_field(frame.alert, 1).c_str());
     gc_pop_font();
     gc_font(gc_font_regular, 13.0f);
     ImGui::PushStyleColor(ImGuiCol_Text, GC_MUTED);
@@ -1642,8 +1643,8 @@ static int gc_render_loading_dialog(const GcFrame& frame, double now) {
     const std::string title = gc_field(frame.loading, 0);
     const std::string detail = gc_field(frame.loading, 1);
     const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float tw = gc_text_size(gc_font_bold, 16.0f, title).x;
-    gc_text(draw, gc_font_bold, 16.0f, ImVec2(p.x + (width - tw) * 0.5f, p.y + 4.0f), GC_FG, title);
+    const float tw = ImMin(width, gc_text_size(gc_font_bold, 16.0f, title).x);
+    gc_text_ellipsis(gc_font_bold, 16.0f, ImVec2(p.x + (width - tw) * 0.5f, p.y + 4.0f), p.x + width, GC_FG, title);
     std::string detail_line = detail;
     if (frame.progress_total > 0) {
       char progress[64];
@@ -1688,7 +1689,7 @@ static int gc_render_snackbar(const GcFrame& frame, ImVec2 panel_min, ImVec2 pan
   const float enter = gc_ease_out(static_cast<float>(age / 0.25));
   const float exit_alpha = age > 5.0 ? 1.0f - static_cast<float>((age - 5.0) / 0.15) : 1.0f;
   const float text_w = gc_text_size(gc_font_regular, GC_BODY, message).x;
-  const float w = ImMax(360.0f, text_w + 32.0f + (undo ? 76.0f : 0.0f) + 44.0f);
+  const float w = ImMin(ImMax(360.0f, text_w + 32.0f + (undo ? 76.0f : 0.0f) + 44.0f), ImMax(360.0f, panel_max.x - panel_min.x - 48.0f));
   const float h = 48.0f;
   const float x = (panel_min.x + panel_max.x - w) * 0.5f;
   const float y = panel_max.y - 24.0f - h + (1.0f - enter) * 16.0f;
@@ -1700,7 +1701,7 @@ static int gc_render_snackbar(const GcFrame& frame, ImVec2 panel_min, ImVec2 pan
   ImGui::Begin("##snackbar", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
   ImDrawList* draw = ImGui::GetWindowDrawList();
   const ImVec2 p = ImGui::GetWindowPos();
-  gc_text(draw, gc_font_regular, GC_BODY, ImVec2(p.x + 16.0f, p.y + 15.0f), GC_WHITE, message);
+  gc_text_ellipsis(gc_font_regular, GC_BODY, ImVec2(p.x + 16.0f, p.y + 15.0f), p.x + w - 16.0f - 36.0f - (undo ? 76.0f : 0.0f), GC_WHITE, message);
   float bx = p.x + w - 6.0f - 36.0f;
   ImGui::SetCursorScreenPos(ImVec2(bx, p.y + 6.0f));
   if (ImGui::InvisibleButton("##snackbar.dismiss", ImVec2(36.0f, 36.0f))) gc_snack_hidden = true;
