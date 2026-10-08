@@ -7,12 +7,13 @@ priv enum FetchJob {
   Personal
   Everything
   AddedRepository(@domain.RepositoryRef)
-  RemovedRepository
   VerifyToken(String, String)
   Credentials(String)
   Auto
-  /// Watched repositories changed outside the app, for example by ghclient.
-  External
+  /// Repositories watched outside the app, for example by ghclient.
+  External(Array[@domain.RepositoryRef])
+  /// The mention settings changed: refetch only the mentions they decide.
+  MentionSettings
 }
 
 ///|
@@ -23,19 +24,25 @@ fn FetchJob::title(self : FetchJob) -> String {
     Personal => "Refreshing For you"
     Everything => "Refreshing activity"
     AddedRepository(repository) => "Loading \{repository.key()}"
-    RemovedRepository => "Updating For you"
     VerifyToken(_, _) => "Verifying token"
     Credentials(_) => "Reloading activity"
     Auto => "Auto refreshing"
-    External => "Updating watched repositories"
+    External(_) => "Updating watched repositories"
+    MentionSettings => "Updating mentions"
   }
 }
 
 ///|
-/// Fetches the user started block the window with the loading dialog.
-/// Background work and token checks (shown in their own dialog) do not.
+/// Refreshes and token changes the user started block the window with the
+/// loading dialog. Background work, newly watched repositories, and token
+/// checks (shown in their own dialog) do not.
 fn FetchJob::is_modal(self : FetchJob) -> Bool {
-  !(self is (Auto | External | RemovedRepository | VerifyToken(_, _)))
+  !(self
+  is (Auto
+  | External(_)
+  | AddedRepository(_)
+  | MentionSettings
+  | VerifyToken(_, _)))
 }
 
 ///|
@@ -47,7 +54,7 @@ fn FetchJob::is_cancellable(self : FetchJob) -> Bool {
 ///|
 fn FetchJob::success_message(self : FetchJob) -> String? {
   match self {
-    Startup | RemovedRepository | VerifyToken(_, _) | Auto | External => None
+    Startup | VerifyToken(_, _) | Auto | External(_) | MentionSettings => None
     Watched => Some("Watched activity refreshed.")
     Personal => Some("For you refreshed.")
     Everything => Some("Activity refreshed.")
@@ -210,7 +217,11 @@ async fn main {
   let suggested_repositories : Array[@github_api.RepositorySummary] = []
   let review_requests : Array[@github_api.ActivitySummary] = []
   let assignments : Array[@github_api.ActivitySummary] = []
+  // Mentioned is `open_mentions` plus `mention_extras`: the merged, closed,
+  // and review comment mentions that the mention settings decide.
   let mentions : Array[@github_api.ActivitySummary] = []
+  let open_mentions : Array[@github_api.ActivitySummary] = []
+  let mention_extras : Array[@github_api.ActivitySummary] = []
   let subscriptions : Array[@github_api.ActivitySummary] = []
   // Review requests GitHub dropped (usually after a teammate reviewed for
   // the team) that still wait for the viewer's own review.
@@ -475,18 +486,49 @@ async fn main {
     last_synced = Some(imgui_now())
   }
 
-  // `next` holds review requests, assignments, mentions, subscriptions,
-  // and kept review requests. Returns the review request URLs to remember.
-  async fn fetch_personal(
-    next : Array[Array[@github_api.ActivitySummary]],
-  ) -> Array[String] {
-    personal_incomplete.clear()
-    let since = @activity_sync.utc_days_ago(@async.now(), settings.mention_days)
-    let closed_mentions = @activity_sync.closed_mentions(
-      since,
+  fn closed_mention_options() -> @activity_sync.ClosedMentions? {
+    @activity_sync.closed_mentions(
+      @activity_sync.utc_days_ago(@async.now(), settings.mention_days),
       merged=settings.include_merged_mentions,
       closed=settings.include_closed_mentions,
     )
+  }
+
+  fn mention_since() -> String {
+    @activity_sync.utc_days_ago(@async.now(), settings.mention_days)
+  }
+
+  // Merged, closed, and review comment mentions for `repositories`.
+  async fn fetch_extras(
+    repositories : Array[@domain.RepositoryRef],
+    extras : Array[@github_api.ActivitySummary],
+  ) -> Unit {
+    // Failures are logged; the watched repository fetch reports the same
+    // repositories.
+    ignore(
+      @activity_sync.fetch_mention_extras(
+        saved_tokens,
+        repo_scopes,
+        owner_scopes,
+        repositories,
+        @activity_sync.saved_logins(),
+        mention_since(),
+        extras,
+        scope_failures,
+        incomplete=personal_incomplete,
+        closed_mentions=closed_mention_options(),
+      ),
+    )
+  }
+
+  // `next` holds review requests, assignments, open mentions, subscriptions,
+  // and kept review requests; `extras` the mentions the settings decide.
+  // Returns the review request URLs to remember.
+  async fn fetch_personal(
+    next : Array[Array[@github_api.ActivitySummary]],
+    extras : Array[@github_api.ActivitySummary],
+  ) -> Array[String] {
+    personal_incomplete.clear()
     ignore(
       @async.all([
         async fn() {
@@ -500,26 +542,9 @@ async fn main {
             _ => loading_detail = "For you and watched repositories",
             () => loading_done += 1,
             incomplete=personal_incomplete,
-            closed_mentions~,
           )
         },
-        async fn() {
-          // Failures are logged; the watched repository fetch reports the
-          // same repositories.
-          ignore(
-            @activity_sync.fetch_review_comment_mentions(
-              saved_tokens,
-              repo_scopes,
-              owner_scopes,
-              model.repositories(),
-              @activity_sync.saved_logins(),
-              since,
-              next[2],
-              incomplete=personal_incomplete,
-              closed_mentions~,
-            ),
-          )
-        },
+        async fn() { fetch_extras(model.repositories(), extras) },
       ]),
     )
     let follow_up = @activity_sync.follow_up_review_requests(
@@ -534,18 +559,29 @@ async fn main {
     follow_up.kept_urls
   }
 
+  // Mentioned shows open mentions and the extras together.
+  fn combine_mentions() -> Unit {
+    let combined = open_mentions.copy()
+    @activity_sync.append_unique_activities(combined, mention_extras)
+    @activity_sync.replace_activities(mentions, combined)
+  }
+
   fn commit_personal(
     generation : Int,
     next : Array[Array[@github_api.ActivitySummary]],
+    extras : Array[@github_api.ActivitySummary],
     kept_urls : Array[String],
   ) -> Unit {
     if generation != active_generation {
       return
     }
     mark_fresh(next)
+    mark_fresh([extras])
     @activity_sync.replace_activities(review_requests, next[0])
     @activity_sync.replace_activities(assignments, next[1])
-    @activity_sync.replace_activities(mentions, next[2])
+    @activity_sync.replace_activities(open_mentions, next[2])
+    @activity_sync.replace_activities(mention_extras, extras)
+    combine_mentions()
     @activity_sync.replace_activities(subscriptions, next[3])
     @activity_sync.replace_activities(kept_review_requests, next[4])
     match @review_request_store.save_default(kept_urls) {
@@ -557,8 +593,96 @@ async fn main {
 
   async fn load_personal(generation : Int) -> Unit {
     let next = [[], [], [], [], []]
-    let kept_urls = fetch_personal(next)
-    commit_personal(generation, next, kept_urls)
+    let extras = []
+    let kept_urls = fetch_personal(next, extras)
+    commit_personal(generation, next, extras, kept_urls)
+  }
+
+  // Newly watched repositories: their pull requests and issues, and the
+  // mentions in their review comments. For you needs nothing else, because
+  // it is fetched across all repositories and narrowed to the watched ones
+  // when shown.
+  async fn load_added(
+    generation : Int,
+    repositories : Array[@domain.RepositoryRef],
+  ) -> Unit {
+    loading_total = repositories.length()
+    loading_detail = repositories.map(repository => repository.key()).join(", ")
+    let next_pull_requests = []
+    let next_issues = []
+    let failures : Map[String, String] = Map([])
+    let extras = []
+    ignore(
+      @async.all([
+        async fn() {
+          @activity_sync.fetch_watched_activity(
+            saved_tokens,
+            repo_scopes,
+            owner_scopes,
+            repositories,
+            next_pull_requests,
+            next_issues,
+            failures,
+            () => loading_done += 1,
+            incomplete=watched_incomplete,
+          )
+        },
+        async fn() { fetch_extras(repositories, extras) },
+      ]),
+    )
+    if generation != active_generation {
+      return
+    }
+    // A repository removed while the fetch was running stays removed.
+    let watched = model.repositories()
+    for repository in repositories {
+      let key = repository.key()
+      guard @domain.repository_is_watched(watched, key) else { continue }
+      match failures.get(key) {
+        Some(error) => repository_failures.set(key, error)
+        None => repository_failures.remove(key)
+      }
+      @activity_sync.replace_activities(
+        pull_requests,
+        @activity_sync.without_repository(pull_requests, key),
+      )
+      @activity_sync.replace_activities(
+        issues,
+        @activity_sync.without_repository(issues, key),
+      )
+    }
+    let kept = (activity : @github_api.ActivitySummary) => {
+      @domain.repository_is_watched(watched, activity.repository())
+    }
+    mark_fresh([next_pull_requests, next_issues, extras])
+    pull_requests.append(next_pull_requests.filter(kept))
+    issues.append(next_issues.filter(kept))
+    @activity_sync.append_unique_activities(mention_extras, extras.filter(kept))
+    combine_mentions()
+  }
+
+  // Only the mentions the settings decide change; open mentions stay.
+  async fn load_mention_extras(generation : Int) -> Unit {
+    loading_total = 1
+    let stale : Array[String] = []
+    for key, _ in personal_incomplete {
+      if key.has_prefix("For you: closed mentions") ||
+        key.has_prefix("For you: review comment mentions") {
+        stale.push(key)
+      }
+    }
+    for key in stale {
+      personal_incomplete.remove(key)
+    }
+    let extras = []
+    fetch_extras(model.repositories(), extras)
+    loading_done += 1
+    if generation != active_generation {
+      return
+    }
+    mark_fresh([extras])
+    @activity_sync.replace_activities(mention_extras, extras)
+    combine_mentions()
   }
 
   async fn load_watched(generation : Int) -> Unit {
@@ -608,6 +732,13 @@ async fn main {
         async fn() { load_personal(generation) },
       ]),
     )
+  }
+
+  // A queued job reads the settings when it runs, so one is enough.
+  fn queue_mention_settings() -> Unit {
+    if !pending_jobs.any(job => job is MentionSettings) {
+      pending_jobs.push(MentionSettings)
+    }
   }
 
   fn watch_repository(raw : String) -> Unit {
@@ -704,53 +835,23 @@ async fn main {
         scope_failures.clear()
         load_everything(generation)
       }
-      RemovedRepository => load_personal(generation)
-      External => {
-        loading_total = saved_tokens.length() + model.repositories().length()
-        load_everything(generation)
-      }
-      AddedRepository(repository) => {
-        loading_total = 1 + saved_tokens.length()
-        loading_detail = repository.key()
-        let next_pull_requests = []
-        let next_issues = []
-        match
-          @activity_sync.fetch_repository_activity(
-            saved_tokens, repo_scopes, owner_scopes, repository, next_pull_requests,
-            next_issues,
-          ) {
-          Some(error) => repository_failures.set(repository.key(), error)
-          None => repository_failures.remove(repository.key())
-        }
-        loading_done += 1
-        if generation != active_generation {
-          return
-        }
-        if @domain.repository_is_watched(model.repositories(), repository.key()) {
-          @activity_sync.replace_activities(
-            pull_requests,
-            @activity_sync.without_repository(pull_requests, repository.key()),
-          )
-          pull_requests.append(next_pull_requests)
-          @activity_sync.replace_activities(
-            issues,
-            @activity_sync.without_repository(issues, repository.key()),
-          )
-          issues.append(next_issues)
-        }
-        load_personal(generation)
-      }
+      External(repositories) => load_added(generation, repositories)
+      AddedRepository(repository) => load_added(generation, [repository])
+      MentionSettings => load_mention_extras(generation)
       Auto => {
         loading_total = saved_tokens.length() + model.repositories().length()
         let next_pull_requests = []
         let next_issues = []
         let next_personal = [[], [], [], [], []]
+        let next_extras = []
         let mut kept_urls : Array[String] = []
         scope_failures.clear()
         ignore(
           @async.all([
             async fn() { fetch_watched(next_pull_requests, next_issues) },
-            async fn() { kept_urls = fetch_personal(next_personal) },
+            async fn() {
+              kept_urls = fetch_personal(next_personal, next_extras)
+            },
           ]),
         )
         // Compare against the seen revisions before committing: every frame
@@ -775,6 +876,11 @@ async fn main {
             }
           }
         }
+        for activity in next_extras {
+          if @domain.repository_is_watched(watched, activity.repository()) {
+            candidates.push((activity, "Mentioned"))
+          }
+        }
         for entry in candidates {
           let url = entry.0.html_url()
           if !muted_urls.contains(url) &&
@@ -788,7 +894,7 @@ async fn main {
           return
         }
         commit_watched(generation, next_pull_requests, next_issues)
-        commit_personal(generation, next_personal, kept_urls)
+        commit_personal(generation, next_personal, next_extras, kept_urls)
         println("auto-refresh: fresh=\{fresh.length()}")
         notify_fresh_activities(fresh)
       }
@@ -994,18 +1100,18 @@ async fn main {
                   )
                 }
               }
-              let mut added = false
+              let added : Array[@domain.RepositoryRef] = []
               for repository in next {
                 if !previous.any(entry => entry.key() == repository.key()) {
                   model = @domain.update(
                     model,
                     @domain.Msg::RegisterRepository(repository),
                   )
-                  added = true
+                  added.push(repository)
                 }
               }
-              if added && !saved_tokens.is_empty() {
-                pending_jobs.push(External)
+              if !added.is_empty() && !saved_tokens.is_empty() {
+                pending_jobs.push(External(added))
               }
               println("store: watched repositories changed outside the app")
             }
@@ -1021,7 +1127,7 @@ async fn main {
               if next != settings {
                 settings = next
                 if !saved_tokens.is_empty() {
-                  pending_jobs.push(Personal)
+                  queue_mention_settings()
                 }
               }
             }
@@ -1078,8 +1184,7 @@ async fn main {
                 Some(message) => notify(message, None)
                 None => ()
               }
-              if job
-                is (Startup | Credentials(_) | Everything | Auto | External) &&
+              if job is (Startup | Credentials(_) | Everything | Auto) &&
                 watched_incomplete.is_empty() &&
                 personal_incomplete.is_empty() {
                 prune_stale_records()
@@ -1430,7 +1535,6 @@ async fn main {
                 }
                 Err(error) => println("repository-store: save failed: \{error}")
               }
-              pending_jobs.push(RemovedRepository)
             }
             Err(_) => ()
           }
@@ -1599,7 +1703,7 @@ async fn main {
                 settings = next
                 remember_files()
                 if !saved_tokens.is_empty() {
-                  pending_jobs.push(Personal)
+                  queue_mention_settings()
                 }
                 println(
                   "ui-action: settings merged=\{next.include_merged_mentions} closed=\{next.include_closed_mentions} days=\{next.mention_days}",

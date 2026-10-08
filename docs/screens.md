@@ -55,6 +55,23 @@ Repository API calls resolve their credential automatically: an exact owner scop
 
 ## Fetching
 
+Requests go out only for what a change affects. For you is fetched across all repositories and narrowed to the watched ones when it is shown, so watching or unwatching a repository does not refetch it.
+
+| Trigger | What is fetched | Blocks the window |
+|---|---|---|
+| Launch, adding or removing a token, a banner's `Retry` | Every token's accessible repositories, then Inbox; For you alongside | Skeleton rows on first launch; the loading dialog otherwise |
+| `Refresh` on Inbox | Inbox: open pull requests and issues of every watched repository | Loading dialog |
+| `Refresh` on For you | For you | Loading dialog |
+| `Refresh` on Saved | Inbox and For you | Loading dialog |
+| Auto refresh, every 5 minutes | Inbox and For you | No |
+| Watch, including undoing an Unwatch | The repository's open pull requests and issues, the mentions in its review comments, and merged or closed mentions | No |
+| Repositories watched outside the app, for example by `ghclient watch` | The same, for the added repositories | No |
+| Unwatch | Nothing | No |
+| Mention settings, in Settings or `settings.txt` | Merged and closed mentions, and mentions in review comments of every watched repository | No |
+| Done, Save, Unsubscribe, Open, page changes | Nothing | No |
+
+"For you" here means, for every token, review requests, assignments, mentions, and subscriptions; mentions in review comments of every watched repository; and a check of each review request the app keeps. Page changes do not fetch because the unread counts in the navigation rail and the notifications need the data while the page is closed.
+
 Every list is read to its last page, 100 items per request: up to 2,000 open pull requests and 2,000 open issues per watched repository, and up to 1,000 items for each For you source (GitHub search itself stops at 1,000). A list that reaches its limit shows a warning banner naming it instead of being cut silently.
 
 Requests carry the ETag of the previous response. GitHub then answers unchanged lists with 304 Not Modified and no body, which GitHub does not count against the rate limit. Measured on this data, 304 responses took as long as full ones, so this saves rate limit and bandwidth rather than time.
@@ -66,10 +83,10 @@ After a refresh that loaded Inbox and For you completely without errors, done an
 GitHub fetches run as background tasks, one job at a time, so the window keeps rendering and never shows the OS busy cursor. Inside a job, tokens, For you sources, and watched repositories are fetched concurrently. Fetched data replaces the visible lists only when a fetch completes.
 
 - First launch shows skeleton rows with a step count until watched activity loads; the rest of the startup load continues in the background.
-- `Refresh`, Watch, and token changes show a modal loading dialog with a spinner, the current step, a determinate progress bar, and `Cancel`. The dialog appears only after 300 ms and then stays at least 500 ms.
-- Auto refresh and token verification do not block the window; auto refresh shows a linear progress bar under the page header.
+- `Refresh` and token changes show a modal loading dialog with a spinner, the current step, a determinate progress bar, and `Cancel`. The dialog appears only after 300 ms and then stays at least 500 ms.
+- Auto refresh, Watch, outside changes, mention settings, and token verification do not block the window; they show a linear progress bar under the page header, and Watch confirms the result in the snackbar when the fetch ends.
 - `Refresh` is disabled while any fetch is running. Control-file commands wait until the fetch ends, except `quit`, `cancel`, and `undo`.
-- A fetch that takes longer than 90 seconds is abandoned and reported in a timeout dialog. Cancel abandons it at once and keeps the previous results. An abandoned fetch that finishes later is ignored.
+- A fetch that takes longer than 90 seconds is abandoned and reported in a timeout dialog, or in the snackbar for fetches that do not block the window. Cancel abandons it at once and keeps the previous results. An abandoned fetch that finishes later is ignored.
 
 ## Motion
 

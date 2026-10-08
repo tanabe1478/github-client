@@ -38,10 +38,24 @@
 
 - InboxとFor youを誤りなく最後まで読めた更新のあとで、どの一覧にも現れなくなったURLのDoneとUnsubscribeの記録を消す。Savedは消さない。
 
+### リクエストのタイミング（2026-10-08に追加）
+
+変更の影響を受ける部分だけを取得する。きっかけごとの取得内容は`docs/screens.md`の「Fetching」の表に従う。
+
+- Watchでは、追加したリポジトリのPR、issue、review commentのmentionと、mergedやclosedのmentionだけを取る。For youは全リポジトリ分を取ってから表示時にWatch中のものへ絞っているので、取り直さない。操作を止めるdialogは出さない。
+- Unwatchでは何も取らない。
+- アプリの外でのWatch追加は、追加されたリポジトリだけを取る。
+- Mentionの設定を変えたら、設定で決まる部分（mergedとclosedのmention、review commentのmention）だけを取り直す。open mentionはそのまま残す。
+- 画面の切り替えでは取得しない。navigation railの未読数と通知は、画面を開いていなくてもデータが要るからである。鮮度は5分ごとの自動更新と手動のRefreshで保つ。
+- 起動、tokenの追加と削除、bannerのRetryは、tokenとリポジトリの対応が変わりうるので全体を取り直す。
+
+きっかけは、Watchのたびに追加したリポジトリと関係のないFor you全体まで取り直し、操作を止めていたことである。
+
 ## 検討した案
 
 - 取得を同期のまま、loading表示を前面に出す: 描画loop自体が止まるので表示を更新できない。不採用。
 - 取得件数を固定（50件など）のままにする: 漏れが出る。不採用。
+- 画面を表示したときにだけ取得する: navigation railの未読数と通知が古くなる。不採用。
 - 上限なしで最後まで読む: 巨大なリポジトリで取得が終わらなくなるおそれがある。上限を置き、超えたことを知らせる形にした。2,000件と1,000件という値は「念のため」の上限で、それ以上の根拠は記録がない。
 
 ## 計測
@@ -56,6 +70,18 @@
 | 同（For you） | 3.92 ms | 1.38 ms |
 
 ETagは速さには効かなかった。同じ16本で、200の平均895 msに対し、304の平均938 msだった。
+
+リクエストのタイミングを整理した前後のリクエスト数（token 4つ、Watch中のリポジトリ14件、実データの複製、2026-10-08）:
+
+| 操作 | 変更前 | 変更後 |
+|---|---|---|
+| Watch（`octocat/Hello-World`。openなPRとissueが特に多い） | 81（追加分34、For you分47） | 39（追加分35、merged・closed mention 4） |
+| Watch（`moonbitlang/core`） | 未計測 | 8 |
+| Unwatch | 37 | 0 |
+| アプリの外でのWatch追加（`moonbitlang/core`） | 未計測（InboxとFor you全体を取り直していた） | 8 |
+| Mentionの設定変更 | 未計測（For you全体を取り直していた。For youのRefreshは46〜47） | 21 |
+
+Watchの追加分が34から35に増えたのは、review commentが2ページになったためである。
 
 ## Consequences
 

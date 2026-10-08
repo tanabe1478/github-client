@@ -712,3 +712,70 @@ pub async fn fetch_review_comment_mentions(
   @github_api.log("review-comment-mentions: mentions=\{mentions.length()}")
   failures
 }
+
+///|
+/// The part of Mentioned that the mention settings decide: merged and closed
+/// mentions from every token, and mentions in review comments of
+/// `repositories`, appended to `mentions`. Token failures go to
+/// `scope_failures`; repository failures are returned.
+pub async fn fetch_mention_extras(
+  tokens : Map[String, String],
+  repo_scopes : Map[String, String],
+  owner_scopes : Map[String, String],
+  repositories : Array[@domain.RepositoryRef],
+  logins : Array[String],
+  since : String,
+  mentions : Array[@github_api.ActivitySummary],
+  scope_failures : Map[String, String],
+  incomplete? : Map[String, Bool] = Map([]),
+  closed_mentions? : ClosedMentions? = None,
+) -> Map[String, String] {
+  let closed : Array[@github_api.ActivitySummary] = []
+  let comments : Array[@github_api.ActivitySummary] = []
+  let mut repository_failures : Map[String, String] = Map([])
+  let closed_tasks = match closed_mentions {
+    None => []
+    Some(options) =>
+      ordered_scopes(tokens).map(scope => {
+        async fn() {
+          guard tokens.get(scope) is Some(token) else { return }
+          match @github_api.list_closed_mentions(token, options.since) {
+            Ok(listing) => {
+              append_unique_activities(
+                closed,
+                listing.items.filter(item => options.keeps(item.state())),
+              )
+              if !listing.complete {
+                incomplete.set("For you: closed mentions", true)
+              }
+            }
+            Err(error) => {
+              scope_failures.set(scope, "closed mentions: \{error}")
+              @github_api.log(
+                "github-personal-activity: scope=\{scope} closed mentions: \{error}",
+              )
+            }
+          }
+        }
+      })
+  }
+  closed_tasks.push(async fn() {
+    repository_failures = fetch_review_comment_mentions(
+      tokens,
+      repo_scopes,
+      owner_scopes,
+      repositories,
+      logins,
+      since,
+      comments,
+      incomplete~,
+      closed_mentions~,
+    )
+  })
+  ignore(@async.all(closed_tasks))
+  // Closed mentions first, so the order does not depend on which finished
+  // first.
+  append_unique_activities(mentions, closed)
+  append_unique_activities(mentions, comments)
+  repository_failures
+}
