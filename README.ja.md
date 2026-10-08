@@ -58,6 +58,22 @@ Kaguraはゲームエンジンなので採用しません。特定作者に寄�
 
 画面一覧と各状態の仕様は[`docs/screens.md`](docs/screens.md)にあります。画像は`scripts/design/render-design.cjs`でcanvasのartboardから再生成できます。
 
+## Done、Save、Unsubscribeの違い
+
+Doneは「今の状態までは見た」、Unsubscribeは「この項目自体をもう見ない」という操作です。
+
+| | Done | Unsubscribe |
+|---|---|---|
+| 押した直後 | 一覧から消える（Show doneで見える） | Savedを含むすべての一覧から消える |
+| GitHubで更新があったとき | 未読に戻って再び表示される | 消えたまま |
+| 通知 | 次の更新で届く | 届かない |
+| 戻し方 | Show doneをオンにして`Move to inbox` | snackbarの`Undo`か`ghclient unmute <url>`。Unsubscribeした項目を一覧する画面はない |
+| GitHub側への影響 | なし | なし（GitHubの購読はそのまま） |
+
+SaveはDoneかどうかに関係なく項目をSavedに残します。
+
+「今は対応しないが、やるときに対応する」項目は、SaveしてからDoneにします。InboxとFor youからは消え、Savedには外すまで残り、GitHubで動きがあれば未読に戻ります。動いたときに気づければよいだけならDoneだけで足ります。Unsubscribeは二度と見なくてよい項目に使います。
+
 ## Modules
 
 - `modules/domain`: Pureなproduct modelとrelevance rule

@@ -34,7 +34,8 @@ In Inbox, two or more updates from `dependabot[bot]` or `renovate[bot]` in one r
 
 - `Done` marks the activity's current GitHub `updated_at` revision as done and hides the row unless `Show done` is on. A later GitHub update makes the item unread again.
 - `Save` adds the activity to Saved; the toggle removes it again.
-- `Unsubscribe` mutes the activity locally: it is hidden from every list, including Saved, and excluded from notifications.
+- `Unsubscribe` mutes the activity locally: it is hidden from every list, including Saved, and excluded from notifications. The GitHub subscription is not changed.
+  No screen lists muted activities; the snackbar's `Undo` or `ghclient unmute` brings one back.
 - `Open` opens the activity in the default browser.
 
 Done, Move to inbox, Done all, Save, Unsubscribe, and Unwatch confirm the result in a snackbar with `Undo`. Other results use the same snackbar without Undo.

@@ -56,6 +56,22 @@ The screens were designed on a Claude Design canvas, "GitHub Client Redesign", a
 
 Every screen and state is specified in [`docs/screens.md`](docs/screens.md). `scripts/design/render-design.cjs` regenerates the images from the canvas artboards.
 
+## Done, Save, and Unsubscribe
+
+Done means "I have seen it as it is now". Unsubscribe means "never show me this item again".
+
+| | Done | Unsubscribe |
+|---|---|---|
+| Right away | Hidden (visible with Show done) | Hidden from every list, Saved included |
+| After the item changes on GitHub | Unread and listed again | Stays hidden |
+| Notifications | Yes, on the next change | Never |
+| Undo | Show done, then `Move to inbox` | The snackbar's `Undo`, or `ghclient unmute <url>`; no screen lists unsubscribed items |
+| Effect on GitHub | None | None; your GitHub subscription stays as it is |
+
+Save keeps an item in Saved whether it is done or not.
+
+For an item you will handle later, Save it and then mark it Done. It leaves Inbox and For you, stays in Saved until you unsave it, and comes back as unread if anything changes on GitHub. If you only want to hear about it when it moves, Done alone is enough. Keep Unsubscribe for items you never need to see again.
+
 ## Modules
 
 - `modules/domain`: pure product model and relevance rules
