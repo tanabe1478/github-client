@@ -13,9 +13,13 @@ pub fn activity_item(
     kind: match activity.kind() {
       PullRequest => PullRequest
       Issue => Issue
+      Release => Release
     },
     draft: activity.is_draft(),
     reasons,
+    tag: activity.tag(),
+    summary: activity.summary(),
+    prerelease: activity.is_prerelease(),
   }
 }
 

@@ -29,12 +29,13 @@ fn kind_name(kind : @domain.InboxItemKind) -> String {
   match kind {
     PullRequest => "pull_request"
     Issue => "issue"
+    Release => "release"
   }
 }
 
 ///|
 fn item_json(item : @domain.ActivityItem, read : Bool, saved : Bool) -> Json {
-  {
+  let json : Json = {
     "url": item.url.to_json(),
     "repository": item.repository.to_json(),
     "number": item.number.to_json(),
@@ -47,6 +48,16 @@ fn item_json(item : @domain.ActivityItem, read : Bool, saved : Bool) -> Json {
     "saved": saved.to_json(),
     "reasons": item.reasons.to_json(),
   }
+  // The object's map is shared, so setting fields changes `json`.
+  match json {
+    Object(fields) if item.kind is Release => {
+      fields.set("tag", item.tag.to_json())
+      fields.set("summary", item.summary.to_json())
+      fields.set("prerelease", item.prerelease.to_json())
+    }
+    _ => ()
+  }
+  json
 }
 
 ///|
@@ -65,10 +76,17 @@ fn errors_json(errors : Array[FetchError]) -> Json {
 ///|
 fn item_line(item : @domain.ActivityItem, read : Bool, saved : Bool) -> String {
   let state = if read { "done  " } else { "unread" }
-  let kind = if item.kind is PullRequest { "PR   " } else { "Issue" }
+  let (kind, number) = match item.kind {
+    PullRequest => ("PR   ", "#\{item.number}")
+    Issue => ("Issue", "#\{item.number}")
+    Release => ("Rel  ", " \{item.tag}")
+  }
   let labels : Array[String] = []
   if item.draft {
     labels.push("draft")
+  }
+  if item.prerelease {
+    labels.push("pre-release")
   }
   if saved {
     labels.push("saved")
@@ -77,7 +95,12 @@ fn item_line(item : @domain.ActivityItem, read : Bool, saved : Bool) -> String {
     labels.push(reason)
   }
   let suffix = if labels.is_empty() { "" } else { "  [\{labels.join(", ")}]" }
-  "\{state}  \{kind}  \{item.repository}#\{item.number}  \{item.title}  @\{item.author}  \{@domain.short_date(item.updated_at)}\{suffix}\n    \{item.url}"
+  let title = if item.summary == "" {
+    item.title
+  } else {
+    "\{item.title}  \{item.summary}"
+  }
+  "\{state}  \{kind}  \{item.repository}\{number}  \{title}  @\{item.author}  \{@domain.short_date(item.updated_at)}\{suffix}\n    \{item.url}"
 }
 
 ///|
@@ -136,12 +159,16 @@ fn retryable(message : String) -> Bool {
 }
 
 ///|
+/// The kinds `options` chooses for `repositories`: pull requests and issues
+/// together, and releases.
 async fn Session::fetch_watched(
   self : Session,
   repositories : Array[@domain.RepositoryRef],
-) -> Array[@github_api.ActivitySummary] {
+  options : Map[String, @domain.WatchOptions],
+) -> (Array[@github_api.ActivitySummary], Array[@github_api.ActivitySummary]) {
   let pull_requests = []
   let issues = []
+  let releases = []
   let failures : Map[String, String] = Map([])
   @activity_sync.fetch_watched_activity(
     self.tokens,
@@ -153,6 +180,8 @@ async fn Session::fetch_watched(
     failures,
     () => (),
     incomplete=self.incomplete,
+    options~,
+    releases~,
   )
   let retry = repositories.filter(repository => {
     failures.get(repository.key()).map(retryable).unwrap_or(false)
@@ -172,13 +201,15 @@ async fn Session::fetch_watched(
       failures,
       () => (),
       incomplete=self.incomplete,
+      options~,
+      releases~,
     )
   }
   for repository, message in failures {
     self.errors.push({ source: repository, message, })
   }
   pull_requests.append(issues)
-  pull_requests
+  (pull_requests, releases)
 }
 
 ///|
@@ -219,7 +250,7 @@ async fn Session::fetch_personal(
     self.tokens,
     self.repo_scopes,
     self.owner_scopes,
-    load_repositories(),
+    for_you_repositories(),
     @activity_sync.saved_logins(),
     since,
     lists[2],
@@ -301,8 +332,18 @@ fn load_markers() -> Array[@domain.ReadMarker] {
 }
 
 ///|
-fn load_repositories() -> Array[@domain.RepositoryRef] {
-  @repository_store.load_default().unwrap_or([])
+fn load_watch_entries() -> (
+  Array[@domain.RepositoryRef],
+  Map[String, @domain.WatchOptions],
+) {
+  @repository_store.load_default_entries().unwrap_or(([], Map([])))
+}
+
+///|
+/// Watched repositories whose options include For you.
+fn for_you_repositories() -> Array[@domain.RepositoryRef] {
+  let (repositories, options) = load_watch_entries()
+  @domain.for_you_repositories(repositories, options)
 }
 
 ///|
@@ -433,7 +474,19 @@ async fn run(invocation : Invocation) -> Int {
         return 1
       }
       let (saved, muted) = load_triage()
-      let activities = session.fetch_watched(load_repositories())
+      let (repositories, options) = load_watch_entries()
+      // Releases have their own command.
+      let without_releases : Map[String, @domain.WatchOptions] = Map([])
+      for repository in repositories {
+        let key = repository.key()
+        without_releases.set(key, {
+          ..@domain.watch_options_for(options, key),
+          releases: false,
+        })
+      }
+      let (activities, _) = session.fetch_watched(
+        repositories, without_releases,
+      )
       print_items(
         invocation,
         @activity_sync.watched_items([activities], muted),
@@ -471,7 +524,7 @@ async fn run(invocation : Invocation) -> Int {
         lists[1],
         lists[2],
         lists[3],
-        load_repositories(),
+        for_you_repositories(),
         muted,
         watched_only=true,
         kept_review_requests=follow_up.pending,
@@ -483,6 +536,34 @@ async fn run(invocation : Invocation) -> Int {
         saved,
         session.errors,
         incomplete=session.incomplete,
+      )
+    }
+    "releases" => {
+      let (session, _) = load_session()
+      if session.tokens.is_empty() {
+        print_error("no token is saved; add one in the app first")
+        return 1
+      }
+      let (saved, muted) = load_triage()
+      let (repositories, options) = load_watch_entries()
+      let chosen = repositories.filter(repository => {
+        @domain.watch_options_for(options, repository.key()).releases
+      })
+      let releases_only : Map[String, @domain.WatchOptions] = Map([])
+      for repository in chosen {
+        releases_only.set(repository.key(), {
+          ..@domain.watch_options_for(options, repository.key()),
+          pull_requests: false,
+          issues: false,
+        })
+      }
+      let (_, releases) = session.fetch_watched(chosen, releases_only)
+      print_items(
+        invocation,
+        @activity_sync.watched_items([releases], muted),
+        load_markers(),
+        saved,
+        session.errors,
       )
     }
     "saved" => {
@@ -542,12 +623,20 @@ async fn run(invocation : Invocation) -> Int {
       let mut markers = load_markers()
       let results : Array[(String, Result[String, String])] = []
       for url in invocation.arguments {
-        match @activity_sync.parse_activity_url(url) {
-          Ok(_) => {
+        match @activity_sync.is_activity_url(url) {
+          true => {
             markers = @domain.mark_activity_unread(markers, url)
             results.push((url, Ok("unread")))
           }
-          Err(message) => results.push((url, Err(message)))
+          false =>
+            results.push(
+              (
+                url,
+                Err(
+                  "expected a https://github.com/owner/repo/pull/N, /issues/N, or /releases/tag/TAG URL",
+                ),
+              ),
+            )
         }
       }
       match @read_state_store.save_default(markers) {
@@ -562,8 +651,8 @@ async fn run(invocation : Invocation) -> Int {
       let (saved, muted) = load_triage()
       let results : Array[(String, Result[String, String])] = []
       for url in invocation.arguments {
-        match @activity_sync.parse_activity_url(url) {
-          Ok(_) => {
+        match @activity_sync.is_activity_url(url) {
+          true => {
             let state = match invocation.command {
               "save" => {
                 saved.set(url, true)
@@ -584,7 +673,15 @@ async fn run(invocation : Invocation) -> Int {
             }
             results.push((url, Ok(state)))
           }
-          Err(message) => results.push((url, Err(message)))
+          false =>
+            results.push(
+              (
+                url,
+                Err(
+                  "expected a https://github.com/owner/repo/pull/N, /issues/N, or /releases/tag/TAG URL",
+                ),
+              ),
+            )
         }
       }
       match save_triage(saved, muted) {
@@ -596,24 +693,47 @@ async fn run(invocation : Invocation) -> Int {
       }
     }
     "repos" => {
-      let repositories = load_repositories()
+      let (repositories, options) = load_watch_entries()
       if invocation.json {
         let json : Json = {
           "repositories": repositories
           .map(repository => repository.key())
           .to_json(),
+          "options": repositories
+          .map(repository => {
+            let entry = @domain.watch_options_for(options, repository.key())
+            let kinds = entry.kinds_text()
+            let json : Json = {
+              "repository": repository.key().to_json(),
+              "kinds": (if kinds == "" {
+                []
+              } else {
+                kinds.split(",").map(kind => kind.to_owned()).to_array()
+              }).to_json(),
+              "release_notify": entry.release_notify.name().to_json(),
+            }
+            json
+          })
+          .to_json(),
         }
         println(json.stringify())
       } else {
         for repository in repositories {
-          println(repository.key())
+          let entry = @domain.watch_options_for(options, repository.key())
+          let releases = if entry.releases {
+            "  releases=\{entry.release_notify.name()}"
+          } else {
+            ""
+          }
+          println("\{repository.key()}  \{entry.kinds_text()}\{releases}")
         }
       }
       0
     }
     "watch" | "unwatch" => {
       let mut model = @domain.Model::new()
-      for repository in load_repositories() {
+      let (repositories, options) = load_watch_entries()
+      for repository in repositories {
         model = @domain.update(model, RegisterRepository(repository))
       }
       let results : Array[(String, Result[String, String])] = []
@@ -622,7 +742,25 @@ async fn run(invocation : Invocation) -> Int {
           Ok(repository) =>
             if invocation.command == "watch" {
               model = @domain.update(model, RegisterRepository(repository))
-              results.push((repository.key(), Ok("watched")))
+              let key = repository.key()
+              let mut entry = @domain.watch_options_for(options, key)
+              if invocation.kinds != "" {
+                // Validated while parsing the options.
+                entry = entry.with_kinds(invocation.kinds).unwrap_or(entry)
+              }
+              match @domain.ReleaseNotify::parse(invocation.release_notify) {
+                Some(level) => entry = { ..entry, release_notify: level, }
+                None => ()
+              }
+              options.set(key, entry)
+              results.push(
+                (
+                  key,
+                  Ok(
+                    "watched: \{entry.kinds_text()}, releases=\{entry.release_notify.name()}",
+                  ),
+                ),
+              )
             } else {
               model = @domain.update(model, RemoveRepository(repository.key()))
               results.push((repository.key(), Ok("not watched")))
@@ -630,7 +768,7 @@ async fn run(invocation : Invocation) -> Int {
           Err(message) => results.push((raw, Err(message)))
         }
       }
-      match @repository_store.save_default(model.repositories()) {
+      match @repository_store.save_default(model.repositories(), options) {
         Ok(_) => print_results(invocation, results)
         Err(error) => {
           print_error("could not save: \{error}")

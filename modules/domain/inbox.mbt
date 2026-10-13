@@ -51,6 +51,7 @@ pub fn DependencyEdge::new(
 pub(all) enum InboxItemKind {
   PullRequest
   Issue
+  Release
 }
 
 ///|

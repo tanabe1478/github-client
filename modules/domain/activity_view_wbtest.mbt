@@ -18,6 +18,9 @@ fn sample_item(
     kind,
     draft: false,
     reasons,
+    tag: "",
+    summary: "",
+    prerelease: false,
   }
 }
 

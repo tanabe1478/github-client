@@ -80,6 +80,7 @@ fn poll_control_commands(
           "settings" => 14
           "for-you" => 15
           "saved" => 16
+          "releases" => 17
           "pull-requests" => {
             github_client_imgui_set_view_kind(1)
             10
@@ -98,9 +99,22 @@ fn poll_control_commands(
         queue.push({ ..control_command(2), repository: argument, })
       "unwatch" if argument != "" =>
         queue.push({ ..control_command(5), repository: argument, })
+      "watch-kinds" if argument != "" && parts.length() > 2 =>
+        queue.push({
+          ..control_command(34),
+          repository: argument,
+          key: "kinds:\{parts[2]}",
+        })
+      "release-notify" if argument != "" && parts.length() > 2 =>
+        queue.push({
+          ..control_command(34),
+          repository: argument,
+          key: "notify:\{parts[2]}",
+        })
       "refresh" => queue.push(control_command(20))
       "refresh-for-you" => queue.push(control_command(21))
       "refresh-all" => queue.push(control_command(32))
+      "auto-refresh" => queue.push(control_command(35))
       "show-done" =>
         github_client_imgui_set_show_done(if argument == "0" { 0 } else { 1 })
       "kind" =>

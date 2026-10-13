@@ -39,6 +39,8 @@ The screens were designed on a Claude Design canvas, "GitHub Client Redesign", a
 
 - Inbox lists open pull requests and issues of watched repositories, grouped by repository. It filters by kind, repository, and text, and folds updates from dependency bots into one row.
 - For you lists review requests (including requests to your teams), assignments, mentions, and subscriptions, each with chips that say why it is there, and filters by reason. A banner points out review requests hidden in repositories you do not watch.
+- Releases lists the releases of watched repositories that choose them, with the first sentence of each release's notes. Use it to follow tools and libraries you depend on, such as `pnpm/pnpm`, without their pull requests and issues.
+- Repositories chooses what each watched repository brings in: pull requests, issues, releases, and For you, plus which releases notify (all, major and minor, major only, or none).
 - Every row has visible buttons: `Open`, `Done`, Save, and More actions (Copy link, Show only this repository, Unsubscribe). Done, Save, and Unsubscribe can be undone from the snackbar.
 
 | Repositories | Settings |
@@ -79,7 +81,7 @@ For an item you will handle later, Save it and then mark it Done. It leaves Inbo
 - `modules/activity_sync`: fetching GitHub activity (concurrent requests, token selection) and turning it into domain items; shared by the app and the CLI
 - `modules/app_paths`: per-OS application data paths
 - `modules/credential_store`: personal access tokens encrypted with DPAPI or the Keychain, for a default token and owner or organization scopes
-- `modules/repository_store`: watched repositories on disk
+- `modules/repository_store`: watched repositories and what each brings in, on disk
 - `modules/read_state_store`: done state of activities on disk
 - `modules/triage_store`: saved and muted activities on disk
 - `modules/review_request_store`: review requests kept until you review, even after GitHub drops a team's request

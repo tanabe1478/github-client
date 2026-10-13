@@ -294,6 +294,8 @@ async fn fetch_scope_activity(
 }
 
 ///|
+/// The kinds `options` chooses for one repository: open pull requests and
+/// issues, and the newest releases.
 pub async fn fetch_repository_activity(
   tokens : Map[String, String],
   repo_scopes : Map[String, String],
@@ -302,6 +304,8 @@ pub async fn fetch_repository_activity(
   pull_requests : Array[@github_api.ActivitySummary],
   issues : Array[@github_api.ActivitySummary],
   incomplete? : Map[String, Bool] = Map([]),
+  options? : @domain.WatchOptions = @domain.WatchOptions::default(),
+  releases? : Array[@github_api.ActivitySummary] = [],
 ) -> String? {
   guard resolve_token(
       tokens,
@@ -316,46 +320,61 @@ pub async fn fetch_repository_activity(
   let errors : Array[String] = []
   let mut pull_request_count = 0
   let mut issue_count = 0
-  match
-    @github_api.list_open_pull_requests(
-      token,
-      repository.owner(),
-      repository.name(),
-    ) {
-    Ok(listing) => {
-      pull_request_count = listing.items.length()
-      pull_requests.append(listing.items)
-      if !listing.complete {
-        incomplete.set("\{repository.key()} pull requests", true)
+  let mut release_count = 0
+  if options.pull_requests {
+    match
+      @github_api.list_open_pull_requests(
+        token,
+        repository.owner(),
+        repository.name(),
+      ) {
+      Ok(listing) => {
+        pull_request_count = listing.items.length()
+        pull_requests.append(listing.items)
+        if !listing.complete {
+          incomplete.set("\{repository.key()} pull requests", true)
+        }
       }
+      Err(error) => errors.push(error)
     }
-    Err(error) => errors.push(error)
   }
-  match
-    @github_api.list_open_issues(token, repository.owner(), repository.name()) {
-    Ok(listing) => {
-      issue_count = listing.items.length()
-      issues.append(listing.items)
-      if !listing.complete {
-        incomplete.set("\{repository.key()} issues", true)
+  if options.issues {
+    match
+      @github_api.list_open_issues(token, repository.owner(), repository.name()) {
+      Ok(listing) => {
+        issue_count = listing.items.length()
+        issues.append(listing.items)
+        if !listing.complete {
+          incomplete.set("\{repository.key()} issues", true)
+        }
       }
+      Err(error) => errors.push(error)
     }
-    Err(error) => errors.push(error)
+  }
+  if options.releases {
+    match
+      @github_api.list_releases(token, repository.owner(), repository.name()) {
+      Ok(items) => {
+        release_count = items.length()
+        releases.append(items)
+      }
+      Err(error) => errors.push(error)
+    }
   }
   @github_api.log(
-    "github-activity: \{repository.key()} pull-requests=\{pull_request_count} issues=\{issue_count}",
+    "github-activity: \{repository.key()} pull-requests=\{pull_request_count} issues=\{issue_count} releases=\{release_count}",
   )
   if errors.is_empty() {
     None
   } else {
-    // Pull requests and issues usually fail for the same reason.
+    // The lists usually fail for the same reason.
     Some(errors[0])
   }
 }
 
 ///|
-/// Open pull requests and issues for every repository, fetched
-/// concurrently. Failures are recorded per repository.
+/// The chosen kinds for every repository, fetched concurrently. Failures
+/// are recorded per repository.
 pub async fn fetch_watched_activity(
   tokens : Map[String, String],
   repo_scopes : Map[String, String],
@@ -366,6 +385,8 @@ pub async fn fetch_watched_activity(
   failures : Map[String, String],
   on_done : () -> Unit,
   incomplete? : Map[String, Bool] = Map([]),
+  options? : Map[String, @domain.WatchOptions] = Map([]),
+  releases? : Array[@github_api.ActivitySummary] = [],
 ) -> Unit {
   let tasks = repositories.map(repository => {
     async fn() {
@@ -378,6 +399,8 @@ pub async fn fetch_watched_activity(
           pull_requests,
           issues,
           incomplete~,
+          options=@domain.watch_options_for(options, repository.key()),
+          releases~,
         ) {
         Some(error) => {
           failures.set(repository.key(), error)
@@ -431,7 +454,36 @@ pub fn parse_activity_url(
 }
 
 ///|
-/// The current state of one issue or pull request, using the token that
+/// Splits "https://github.com/owner/name/releases/tag/v1.2.3" into the
+/// repository and the tag, as the URL spells it.
+pub fn parse_release_url(url : String) -> (@domain.RepositoryRef, String)? {
+  let prefix = "https://github.com/"
+  guard url.has_prefix(prefix) else { return None }
+  let parts = url[prefix.length():]
+    .to_owned()
+    .split("/")
+    .to_array()
+    .map(part => part.to_owned())
+  guard parts.length() >= 5 &&
+    parts[0] != "" &&
+    parts[1] != "" &&
+    parts[2] == "releases" &&
+    parts[3] == "tag" &&
+    parts[4] != "" else {
+    return None
+  }
+  let tag = parts[4:].to_owned().join("/")
+  Some((@domain.RepositoryRef::new(parts[0], parts[1]), tag))
+}
+
+///|
+/// Whether `url` names an issue, a pull request, or a release.
+pub fn is_activity_url(url : String) -> Bool {
+  parse_activity_url(url) is Ok(_) || parse_release_url(url) is Some(_)
+}
+
+///|
+/// The current state of one issue, pull request, or release, using the token that
 /// `resolve_token` picks for its repository.
 pub async fn fetch_activity(
   tokens : Map[String, String],
@@ -439,9 +491,33 @@ pub async fn fetch_activity(
   owner_scopes : Map[String, String],
   url : String,
 ) -> Result[@github_api.ActivitySummary, String] {
+  match parse_release_url(url) {
+    Some((repository, tag)) => {
+      guard resolve_token(
+          tokens,
+          repo_scopes,
+          owner_scopes,
+          repository.owner(),
+          repository.name(),
+        )
+        is Some(token) else {
+        return Err("no saved token can access \{repository.owner()}")
+      }
+      return @github_api.get_release(
+        token,
+        repository.owner(),
+        repository.name(),
+        tag,
+      )
+    }
+    None => ()
+  }
   let (repository, number) = match parse_activity_url(url) {
     Ok(parsed) => parsed
-    Err(error) => return Err(error)
+    Err(_) =>
+      return Err(
+        "expected a https://github.com/owner/repo/pull/N, /issues/N, or /releases/tag/TAG URL",
+      )
   }
   guard resolve_token(
       tokens,

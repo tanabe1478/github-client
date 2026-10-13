@@ -41,6 +41,8 @@ Kaguraはゲームエンジンなので採用しません。特定作者に寄�
 
 - Inbox: Watch中のrepositoryのopen pull request / issueをrepositoryごとに表示します。kind、repository、textで絞り込み、dependency botの更新は1行にまとめます。
 - For you: review依頼（team宛てを含む）、assign、mention、購読を理由のchip付きで表示し、理由で絞り込めます。Watchしていないrepositoryに隠れたreview依頼はbannerで知らせます。
+- Releases: Releasesを選んだWatch中repositoryのreleaseを、release noteの最初の1文付きで表示します。`pnpm/pnpm`のように、依存しているtoolやlibraryのreleaseだけを、PRやissueなしで追えます。
+- Repositories: Watch中のrepositoryごとに、受け取る種類（pull request、issue、release、For you）と、通知するrelease（すべて、メジャーとマイナー、メジャーのみ、なし）を選べます。
 - 各行の操作は常に見えるbuttonです。`Open`、`Done`、Save、More actions（Copy link、Show only this repository、Unsubscribe）を置き、Done / Save / UnsubscribeはsnackbarのUndoで取り消せます。
 
 | Repositories | Settings |
@@ -80,7 +82,7 @@ SaveはDoneかどうかに関係なく項目をSavedに残します。
 - `modules/github_api`: 最小GitHub API surface
 - `modules/app_paths`: OS別application data path
 - `modules/credential_store`: DPAPI/KeychainによるPAT暗号化保存（`default`とowner/organization scopeの複数トークンに対応）
-- `modules/repository_store`: 登録repositoryのfilesystem persistence
+- `modules/repository_store`: 登録repositoryと受け取る種類のfilesystem persistence
 - `modules/read_state_store`: activityの未読・既読状態のfilesystem persistence
 - `modules/triage_store`: 保存（Saved）とミュートのfilesystem persistence
 - `modules/review_request_store`: team宛てのreview依頼が外れたあともreviewするまで残すためのURL記録

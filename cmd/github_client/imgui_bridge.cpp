@@ -285,7 +285,7 @@ enum GcIcon {
   GC_ICON_REPO, GC_ICON_GEAR, GC_ICON_REFRESH, GC_ICON_SEARCH, GC_ICON_KEBAB,
   GC_ICON_CHEVRON_DOWN, GC_ICON_CHEVRON_UP, GC_ICON_CLOSE, GC_ICON_INFO,
   GC_ICON_WARNING, GC_ICON_ERROR, GC_ICON_OFFLINE, GC_ICON_LINK,
-  GC_ICON_BELL_OFF, GC_ICON_LOCK, GC_ICON_CHECK_CIRCLE, GC_ICON_NONE
+  GC_ICON_BELL_OFF, GC_ICON_LOCK, GC_ICON_CHECK_CIRCLE, GC_ICON_TAG, GC_ICON_NONE
 };
 
 static void gc_icon(ImDrawList* draw, GcIcon icon, ImVec2 origin, float size, ImU32 color) {
@@ -311,6 +311,13 @@ static void gc_icon(ImDrawList* draw, GcIcon icon, ImVec2 origin, float size, Im
       break;
     case GC_ICON_ISSUE:
       ring(8, 8, 6.25f); dot(8, 8, 1.4f);
+      break;
+    case GC_ICON_TAG:
+      draw->PathLineTo(p(2.25f, 2.25f)); draw->PathLineTo(p(8.25f, 2.25f));
+      draw->PathLineTo(p(13.75f, 7.75f)); draw->PathLineTo(p(7.75f, 13.75f));
+      draw->PathLineTo(p(2.25f, 8.25f));
+      draw->PathStroke(color, ImDrawFlags_Closed, t);
+      dot(5.5f, 5.5f, 1.2f);
       break;
     case GC_ICON_BUNDLE:
       draw->PathLineTo(p(8, 1.75f)); draw->PathLineTo(p(13.5f, 4.75f));
@@ -591,6 +598,9 @@ static void gc_progress_bar(ImDrawList* draw, ImVec2 min, ImVec2 max, int done, 
 static int gc_view_kind = 0;
 static std::string gc_view_repository;
 static char gc_query_input[256] = "";
+// Releases keeps its own repository and text filters, apart from Inbox.
+static std::string gc_release_repository;
+static char gc_release_query[256] = "";
 static std::string gc_view_reason;
 static bool gc_show_done = false;
 static bool gc_auto_refresh_enabled = true;
@@ -710,6 +720,7 @@ static int gc_render_nav(const GcFrame& frame, float height) {
   auto place = [&]() { ImGui::SetCursorPos(ImVec2(12.0f, y)); y += 42.0f; };
   place(); if (gc_nav_item("##nav.inbox", "Inbox", GC_ICON_INBOX, page == 0, gc_int_field(frame.nav, 0), page == 0, false)) action = 10;
   place(); if (gc_nav_item("##nav.for-you", "For you", GC_ICON_AT, page == 5, gc_int_field(frame.nav, 1), page == 5, false)) action = 15;
+  place(); if (gc_nav_item("##nav.releases", "Releases", GC_ICON_TAG, page == 7, gc_int_field(frame.nav, 5), page == 7, false)) action = 17;
   place(); if (gc_nav_item("##nav.saved", "Saved", GC_ICON_BOOKMARK, page == 6, 0, false, false)) action = 16;
   draw->AddLine(ImVec2(origin.x + 20.0f, origin.y + y + 8.0f), ImVec2(origin.x + 212.0f, origin.y + y + 8.0f), GC_BORDER, 1.0f);
   y += 18.0f;
@@ -810,8 +821,10 @@ static int gc_render_item(const std::vector<std::string>& r, float width) {
   float x = pos.x + 20.0f + (nested ? 32.0f : 0.0f);
   if (!read) draw->AddCircleFilled(ImVec2(x + 4.0f, pos.y + h * 0.5f), 4.0f, GC_ACCENT);
   x += 16.0f;
+  const bool release = kind == "release";
   if (!nested) {
-    const GcIcon icon = kind == "pr" ? (draft ? GC_ICON_PR_DRAFT : GC_ICON_PR) : GC_ICON_ISSUE;
+    const GcIcon icon = release ? GC_ICON_TAG : kind == "pr" ? (draft ? GC_ICON_PR_DRAFT : GC_ICON_PR) : GC_ICON_ISSUE;
+    // For a release the draft flag marks a pre-release.
     const ImU32 icon_color = read ? GC_SUBTLE : (draft ? GC_MUTED : GC_SUCCESS);
     gc_icon(draw, icon, ImVec2(x, pos.y + 12.0f), 16.0f, icon_color);
     x += 28.0f;
@@ -839,15 +852,16 @@ static int gc_render_item(const std::vector<std::string>& r, float width) {
     gc_text(draw, gc_font_regular, GC_SMALL, ImVec2(mx, my), GC_MUTED, repository);
     mx += gc_text_size(gc_font_regular, GC_SMALL, repository).x + 8.0f;
   }
-  const std::string number_text = "#" + number;
+  // Releases show their tag where other rows show #number.
+  const std::string number_text = release ? number : "#" + number;
   gc_text(draw, gc_font_mono, 12.0f, ImVec2(mx, my + 0.5f), GC_MUTED, number_text);
   mx += gc_text_size(gc_font_mono, 12.0f, number_text).x;
-  std::string after = "  \xC2\xB7  @" + author;
-  if (!date.empty()) after += "  \xC2\xB7  updated " + date;
+  std::string after = author.empty() ? std::string() : "  \xC2\xB7  @" + author;
+  if (!date.empty()) after += (release ? "  \xC2\xB7  released " : "  \xC2\xB7  updated ") + date;
   gc_text(draw, gc_font_regular, GC_SMALL, ImVec2(mx, my), GC_MUTED, after);
   mx += gc_text_size(gc_font_regular, GC_SMALL, after).x + 8.0f;
   if (read) mx += gc_pill(draw, ImVec2(mx, my - 3.0f), "Done", GC_MUTED, GC_WHITE, GC_BORDER) + 6.0f;
-  if (draft) mx += gc_pill(draw, ImVec2(mx, my - 3.0f), "Draft", GC_MUTED, GC_WHITE, GC_BORDER) + 6.0f;
+  if (draft) mx += gc_pill(draw, ImVec2(mx, my - 3.0f), release ? "Pre-release" : "Draft", GC_MUTED, GC_WHITE, GC_BORDER) + 6.0f;
   if (saved) mx += gc_pill(draw, ImVec2(mx, my - 3.0f), "Saved", GC_ACCENT, GC_ACCENT_SUBTLE, GC_ACCENT_BORDER) + 6.0f;
   ImGui::PopClipRect();
   const float by = pos.y + (h - 32.0f) * 0.5f;
@@ -970,14 +984,54 @@ static bool gc_chip(const char* id, const char* label, bool selected, ImU32 dot)
 
 static bool gc_filters_active(int page) {
   if (page == 5) return !gc_view_reason.empty();
+  if (page == 7) return !gc_release_repository.empty() || gc_release_query[0] != '\0';
   return gc_view_kind != 0 || !gc_view_repository.empty() || gc_query_input[0] != '\0';
 }
 
 static void gc_clear_filters() {
   gc_view_kind = 0; gc_view_repository.clear(); gc_query_input[0] = '\0'; gc_view_reason.clear();
+  gc_release_repository.clear(); gc_release_query[0] = '\0';
 }
 
-// Toolbar for Inbox (kind, repository, query) and For you (reason chips).
+static bool gc_kinds_include(const std::vector<std::string>& repository, const char* kind) {
+  for (const std::string& chosen : gc_split(gc_field(repository, 1), ',')) {
+    if (chosen == kind) return true;
+  }
+  return false;
+}
+
+// Repository and text filters; Releases lists only repositories that choose
+// releases and keeps its own filters.
+static void gc_repository_and_query_filters(const GcFrame& frame, float x, float width, bool releases) {
+  std::string& selected = releases ? gc_release_repository : gc_view_repository;
+  gc_font(gc_font_regular, 13.0f);
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextDisabled("Repository");
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(220.0f);
+  const std::string preview = selected.empty() ? std::string("All watched") : selected;
+  if (ImGui::BeginCombo("##filter.repository", preview.c_str())) {
+    if (ImGui::Selectable("All watched", selected.empty())) selected.clear();
+    for (const auto& repository : frame.repositories) {
+      if (releases && !gc_kinds_include(repository, "releases")) continue;
+      const std::string name = gc_field(repository, 0);
+      if (ImGui::Selectable(name.c_str(), selected == name)) selected = name;
+    }
+    ImGui::EndCombo();
+  }
+  ImGui::SameLine(0.0f, 12.0f);
+  const float remaining = x + width - ImGui::GetCursorPosX() - 124.0f;
+  ImGui::SetNextItemWidth(ImMax(160.0f, remaining));
+  if (releases) {
+    ImGui::InputTextWithHint("##filter.release-query", "Filter by name, tag, or @author", gc_release_query, sizeof(gc_release_query));
+  } else {
+    ImGui::InputTextWithHint("##filter.query", "Filter by title, #number, or @author", gc_query_input, sizeof(gc_query_input));
+  }
+  gc_pop_font();
+}
+
+// Toolbar for Inbox (kind, repository, query), Releases (repository,
+// query), and For you (reason chips).
 static void gc_render_toolbar(const GcFrame& frame, float x, float width) {
   const float row_y = ImGui::GetCursorPosY();
   ImGui::SetCursorPos(ImVec2(x, row_y));
@@ -999,25 +1053,9 @@ static void gc_render_toolbar(const GcFrame& frame, float x, float width) {
       sx += gc_text_size(gc_font_bold, 13.0f, labels[k]).x + 28.0f + 2.0f;
     }
     ImGui::SetCursorScreenPos(ImVec2(group.x + gw + 16.0f, group.y));
-    gc_font(gc_font_regular, 13.0f);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextDisabled("Repository");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(220.0f);
-    const std::string preview = gc_view_repository.empty() ? std::string("All watched") : gc_view_repository;
-    if (ImGui::BeginCombo("##filter.repository", preview.c_str())) {
-      if (ImGui::Selectable("All watched", gc_view_repository.empty())) gc_view_repository.clear();
-      for (const auto& repository : frame.repositories) {
-        const std::string name = gc_field(repository, 0);
-        if (ImGui::Selectable(name.c_str(), gc_view_repository == name)) gc_view_repository = name;
-      }
-      ImGui::EndCombo();
-    }
-    ImGui::SameLine(0.0f, 12.0f);
-    const float remaining = x + width - ImGui::GetCursorPosX() - 124.0f;
-    ImGui::SetNextItemWidth(ImMax(160.0f, remaining));
-    ImGui::InputTextWithHint("##filter.query", "Filter by title, #number, or @author", gc_query_input, sizeof(gc_query_input));
-    gc_pop_font();
+    gc_repository_and_query_filters(frame, x, width, false);
+  } else if (frame.page == 7) {
+    gc_repository_and_query_filters(frame, x, width, true);
   } else {
     struct Reason { const char* label; ImU32 dot; };
     const Reason reasons[] = {
@@ -1090,7 +1128,7 @@ static int gc_render_activity_page(const GcFrame& frame, float width, double now
   int action = 0;
   const float pad = 24.0f;
   if (!frame.has_credentials) return gc_render_onboarding(width);
-  if (frame.page == 0 || frame.page == 5) gc_render_toolbar(frame, pad, width - pad * 2.0f);
+  if (frame.page == 0 || frame.page == 5 || frame.page == 7) gc_render_toolbar(frame, pad, width - pad * 2.0f);
   {
     const ImVec2 p = ImGui::GetCursorScreenPos();
     ImGui::GetWindowDrawList()->AddLine(ImVec2(ImGui::GetWindowPos().x, p.y), ImVec2(ImGui::GetWindowPos().x + width, p.y), GC_BORDER);
@@ -1135,6 +1173,8 @@ static int gc_render_activity_page(const GcFrame& frame, float width, double now
       if (gc_button("##empty.clear", "Clear filters", GC_BUTTON_DEFAULT)) gc_clear_filters();
       ImGui::SetCursorScreenPos(ImVec2(button.x - (cw + 8.0f + dw) * 0.5f + cw + 8.0f, button.y));
       if (gc_button("##empty.show-done", gc_show_done ? "Hide done" : "Show done", GC_BUTTON_DEFAULT)) gc_show_done = !gc_show_done;
+    } else if (frame.page == 7) {
+      gc_empty_state(list_w, GC_ICON_TAG, GC_SUBTLE, "No releases yet", "In Repositories, choose Releases for the watched repositories you want to follow.");
     } else if (frame.page == 6) {
       gc_empty_state(list_w, GC_ICON_BOOKMARK, GC_SUBTLE, "No saved items yet", "Use the bookmark button on any row in Inbox or For you.");
     } else if (frame.page == 5) {
@@ -1203,23 +1243,78 @@ static int gc_render_repositories(const GcFrame& frame, float width) {
   ImVec2 list = ImGui::GetCursorScreenPos();
   gc_text(draw, gc_font_bold, GC_BODY, list, GC_FG, heading);
   list.y += 28.0f;
-  const float row_h = 52.0f;
-  const float list_h = ImMax(1.0f, static_cast<float>(frame.repositories.size())) * row_h;
-  draw->AddRect(list, ImVec2(list.x + col_w, list.y + list_h), GC_BORDER, 12.0f);
+  const float row_h = 84.0f;
+  // The list scrolls on its own; the note stays under it.
+  ImGui::SetCursorScreenPos(list);
+  const float list_h = ImMax(52.0f, ImGui::GetContentRegionAvail().y - 20.0f - 30.0f);
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 12.0f);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+  ImGui::BeginChild("##watched", ImVec2(col_w, list_h), ImGuiChildFlags_Borders);
+  ImDrawList* wdraw = ImGui::GetWindowDrawList();
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+  const float lw = ImGui::GetContentRegionAvail().x;
   if (frame.repositories.empty()) {
-    gc_text(draw, gc_font_regular, 13.0f, ImVec2(list.x + 20.0f, list.y + 17.0f), GC_MUTED, "No repositories are watched yet.");
+    gc_text(wdraw, gc_font_regular, 13.0f, ImVec2(origin.x + 20.0f, origin.y + 17.0f), GC_MUTED, "No repositories are watched yet.");
   }
+  // Each row: name, release notification, and Unwatch, then a toggle per
+  // kind the repository brings in.
+  struct Kind { const char* key; const char* label; };
+  const Kind kinds[] = {{"pull-requests", "Pull requests"}, {"issues", "Issues"}, {"releases", "Releases"}, {"for-you", "For you"}};
+  struct Level { const char* key; const char* label; };
+  const Level levels[] = {{"all", "All releases"}, {"major-minor", "Major and minor"}, {"major", "Major only"}, {"off", "No notifications"}};
   for (size_t k = 0; k < frame.repositories.size(); ++k) {
     const std::string name = gc_field(frame.repositories[k], 0);
-    const float y = list.y + k * row_h;
-    if (k > 0) draw->AddLine(ImVec2(list.x + 1.0f, y), ImVec2(list.x + col_w - 1.0f, y), GC_BORDER_MUTED);
-    gc_icon(draw, GC_ICON_REPO, ImVec2(list.x + 20.0f, y + 18.0f), 16.0f, GC_MUTED);
-    gc_text_ellipsis(gc_font_bold, GC_BODY, ImVec2(list.x + 46.0f, y + 16.0f), list.x + col_w - 124.0f, GC_FG, name);
-    ImGui::SetCursorScreenPos(ImVec2(list.x + col_w - 16.0f - 88.0f, y + 10.0f));
+    const std::string notify = gc_field(frame.repositories[k], 2);
+    const bool releases = gc_kinds_include(frame.repositories[k], "releases");
+    const float y = origin.y + k * row_h;
+    if (k > 0) wdraw->AddLine(ImVec2(origin.x, y), ImVec2(origin.x + lw, y), GC_BORDER_MUTED);
+    gc_icon(wdraw, GC_ICON_REPO, ImVec2(origin.x + 20.0f, y + 18.0f), 16.0f, GC_MUTED);
+    const float notify_w = 150.0f;
+    const float name_max = origin.x + lw - 124.0f - (releases ? notify_w + 8.0f : 0.0f);
+    gc_text_ellipsis(gc_font_bold, GC_BODY, ImVec2(origin.x + 46.0f, y + 16.0f), name_max, GC_FG, name);
     ImGui::PushID(name.c_str());
+    if (releases) {
+      ImGui::SetCursorScreenPos(ImVec2(origin.x + lw - 16.0f - 88.0f - 8.0f - notify_w, y + 12.0f));
+      gc_font(gc_font_regular, 12.0f);
+      ImGui::SetNextItemWidth(notify_w);
+      const char* preview = "Major and minor";
+      for (const Level& level : levels) if (notify == level.key) preview = level.label;
+      if (ImGui::BeginCombo("##watched.notify", preview)) {
+        for (const Level& level : levels) {
+          if (ImGui::Selectable(level.label, notify == level.key)) {
+            gc_selected_repository = name; gc_selected_key = std::string("notify:") + level.key; action = 34;
+          }
+        }
+        ImGui::EndCombo();
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("Which releases post a notification");
+      gc_pop_font();
+    }
+    ImGui::SetCursorScreenPos(ImVec2(origin.x + lw - 16.0f - 88.0f, y + 10.0f));
     if (gc_button("##watched.remove", "Unwatch", GC_BUTTON_DANGER, GC_ICON_NONE, false, 88.0f)) { gc_selected_repository = name; action = 5; }
+    float cx = origin.x + 46.0f;
+    for (const Kind& kind : kinds) {
+      const bool on = gc_kinds_include(frame.repositories[k], kind.key);
+      const float w = gc_text_size(on ? gc_font_bold : gc_font_regular, 12.0f, kind.label).x + 20.0f + 14.0f;
+      const ImVec2 cp(cx, y + 48.0f);
+      ImGui::SetCursorScreenPos(cp);
+      ImGui::PushID(kind.key);
+      const bool pressed = ImGui::InvisibleButton("##watched.kind", ImVec2(w, 24.0f));
+      const bool hovered = ImGui::IsItemHovered();
+      ImGui::PopID();
+      wdraw->AddRectFilled(cp, ImVec2(cp.x + w, cp.y + 24.0f), on ? GC_ACCENT_SUBTLE : hovered ? GC_CANVAS : GC_WHITE, 12.0f);
+      wdraw->AddRect(cp, ImVec2(cp.x + w, cp.y + 24.0f), on ? GC_ACCENT_BORDER : GC_BORDER, 12.0f);
+      if (on) gc_icon(wdraw, GC_ICON_CHECK, ImVec2(cp.x + 8.0f, cp.y + 6.0f), 12.0f, GC_ACCENT_EMPHASIS);
+      gc_text(wdraw, on ? gc_font_bold : gc_font_regular, 12.0f, ImVec2(cp.x + 24.0f, cp.y + 5.0f), on ? GC_ACCENT_EMPHASIS : GC_MUTED, kind.label);
+      if (pressed) { gc_selected_repository = name; gc_selected_key = std::string("toggle:") + kind.key; action = 34; }
+      cx += w + 6.0f;
+    }
     ImGui::PopID();
   }
+  ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + ImMax(52.0f, static_cast<float>(frame.repositories.size()) * row_h)));
+  ImGui::Dummy(ImVec2(lw, 0.0f));
+  ImGui::EndChild();
+  ImGui::PopStyleVar(2);
   draw->AddText(gc_font_regular, 12.0f, ImVec2(list.x, list.y + list_h + 10.0f), GC_MUTED,
                 "Unwatching keeps done and saved state. You can watch the repository again at any time.", nullptr, col_w);
   // Right column: suggestions from every saved token.
@@ -1428,7 +1523,10 @@ static int gc_render_row_menu() {
       ImGui::SetClipboardText(gc_menu_url.c_str()); action = 31; ImGui::CloseCurrentPopup();
     }
     if (item("##menu.only-repository", GC_ICON_REPO, "Show only this repository", nullptr, GC_FG)) {
-      gc_view_repository = gc_menu_repository; action = 10; ImGui::CloseCurrentPopup();
+      // On Releases the filter stays there; elsewhere it opens Inbox.
+      if (gc_last_page == 7) { gc_release_repository = gc_menu_repository; action = 17; }
+      else { gc_view_repository = gc_menu_repository; action = 10; }
+      ImGui::CloseCurrentPopup();
     }
     const ImVec2 sep = ImGui::GetCursorScreenPos();
     ImGui::GetWindowDrawList()->AddLine(ImVec2(sep.x, sep.y + 3.0f), ImVec2(sep.x + 268.0f, sep.y + 3.0f), GC_BORDER_MUTED);
@@ -1782,12 +1880,12 @@ extern "C" int github_client_imgui_render(
   ImGui::BeginChild("##workspace", ImVec2(panel_w, panel_h), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
   const float content_w = ImGui::GetContentRegionAvail().x;
   {
-    const char* titles[] = {"Inbox", "Repositories", "Inbox", "Inbox", "Settings", "For you", "Saved"};
-    const int title_index = (page >= 0 && page <= 6) ? page : 0;
+    const char* titles[] = {"Inbox", "Repositories", "Inbox", "Inbox", "Settings", "For you", "Saved", "Releases"};
+    const int title_index = (page >= 0 && page <= 7) ? page : 0;
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const ImVec2 p = ImGui::GetCursorScreenPos();
     gc_text(draw, gc_font_bold, GC_TITLE, ImVec2(p.x + 24.0f, p.y + 20.0f), GC_FG, titles[title_index]);
-    const bool activity_page = page == 0 || page == 5 || page == 6;
+    const bool activity_page = page == 0 || page == 5 || page == 6 || page == 7;
     float subtitle_max = p.x + content_w - 24.0f;
     if (activity_page && frame.has_credentials) {
       const float refresh_w = gc_button_width("Refresh", GC_ICON_REFRESH);
@@ -1874,17 +1972,25 @@ extern "C" moonbit_string_t github_client_imgui_take_activity_updated_at(void) {
 extern "C" moonbit_string_t github_client_imgui_take_key(void) { return gc_moonbit_string(gc_selected_key); }
 
 extern "C" int github_client_imgui_view_kind(void) { return gc_view_kind; }
-extern "C" moonbit_string_t github_client_imgui_view_repository(void) { return gc_moonbit_string(gc_view_repository); }
-extern "C" moonbit_string_t github_client_imgui_view_query(void) { return gc_moonbit_string(gc_query_input); }
+// The filters of the page shown last; Releases has its own.
+extern "C" moonbit_string_t github_client_imgui_view_repository(void) {
+  return gc_moonbit_string(gc_last_page == 7 ? gc_release_repository : gc_view_repository);
+}
+extern "C" moonbit_string_t github_client_imgui_view_query(void) {
+  return gc_moonbit_string(gc_last_page == 7 ? std::string(gc_release_query) : std::string(gc_query_input));
+}
 extern "C" moonbit_string_t github_client_imgui_view_reason(void) { return gc_moonbit_string(gc_view_reason); }
 extern "C" int github_client_imgui_view_show_done(void) { return gc_show_done ? 1 : 0; }
 extern "C" int github_client_imgui_auto_refresh_enabled(void) { return gc_auto_refresh_enabled ? 1 : 0; }
 
 extern "C" void github_client_imgui_set_show_done(int value) { gc_show_done = value != 0; }
 extern "C" void github_client_imgui_set_view_kind(int value) { gc_view_kind = ImClamp(value, 0, 2); }
-extern "C" void github_client_imgui_set_view_repository(const uint16_t* value) { gc_view_repository = gc_utf8(value); }
+extern "C" void github_client_imgui_set_view_repository(const uint16_t* value) {
+  (gc_last_page == 7 ? gc_release_repository : gc_view_repository) = gc_utf8(value);
+}
 extern "C" void github_client_imgui_set_view_query(const uint16_t* value) {
-  std::snprintf(gc_query_input, sizeof(gc_query_input), "%s", gc_utf8(value).c_str());
+  char* target = gc_last_page == 7 ? gc_release_query : gc_query_input;
+  std::snprintf(target, 256, "%s", gc_utf8(value).c_str());
 }
 extern "C" void github_client_imgui_set_view_reason(const uint16_t* value) { gc_view_reason = gc_utf8(value); }
 

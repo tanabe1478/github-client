@@ -10,6 +10,11 @@ pub(all) struct ActivityItem {
   kind : InboxItemKind
   draft : Bool
   reasons : Array[String]
+  /// Releases only: the tag, the first sentence of the notes, and whether
+  /// it is a pre-release.
+  tag : String
+  summary : String
+  prerelease : Bool
 }
 
 ///|
@@ -83,7 +88,9 @@ fn matches_query(item : ActivityItem, query : String) -> Bool {
     return contains_ignore_case("@" + item.author, trimmed)
   }
   contains_ignore_case(item.title, trimmed) ||
-  contains_ignore_case("#\{item.number}", trimmed)
+  contains_ignore_case("#\{item.number}", trimmed) ||
+  (item.tag != "" && contains_ignore_case(item.tag, trimmed)) ||
+  (item.summary != "" && contains_ignore_case(item.summary, trimmed))
 }
 
 ///|

@@ -10,6 +10,10 @@ priv struct Invocation {
   repository : String
   query : String
   reason : String
+  /// `watch` only: the kinds to bring in and the release notification;
+  /// empty keeps them.
+  kinds : String
+  release_notify : String
 }
 
 ///|
@@ -21,6 +25,8 @@ let usage : String =
   #|             --kind all|pr|issue  --repo OWNER/NAME  --query TEXT  --all
   #|  for-you    review requests, assignments, mentions, and subscriptions
   #|             in watched repositories   --reason REASON  --all
+  #|  releases   releases of watched repositories that choose them
+  #|             --repo OWNER/NAME  --query TEXT  --all
   #|  saved      items saved for later
   #|
   #|Triage, stored locally (a running app picks the change up):
@@ -30,8 +36,10 @@ let usage : String =
   #|  mute <url>...      hide everywhere       unmute <url>...
   #|
   #|Repositories and accounts:
-  #|  repos                    watched repositories
-  #|  watch <owner/name>...    start watching
+  #|  repos                    watched repositories and what each brings in
+  #|  watch <owner/name>...    start watching, or change what it brings in
+  #|             --kinds pull-requests,issues,releases,for-you
+  #|             --release-notify all|major-minor|major|off
   #|  unwatch <owner/name>...  stop watching
   #|  accounts                 saved tokens (scope and login, never the token)
   #|
@@ -48,8 +56,8 @@ let usage : String =
 
 ///|
 let commands : Array[String] = [
-  "inbox", "for-you", "saved", "done", "undone", "save", "unsave", "mute", "unmute",
-  "repos", "watch", "unwatch", "accounts", "help",
+  "inbox", "for-you", "releases", "saved", "done", "undone", "save", "unsave", "mute",
+  "unmute", "repos", "watch", "unwatch", "accounts", "help",
 ]
 
 ///|
@@ -68,6 +76,8 @@ fn parse_invocation(args : Array[String]) -> Result[Invocation, String] {
   let mut repository = ""
   let mut query = ""
   let mut reason = ""
+  let mut kinds = ""
+  let mut release_notify = ""
   let mut index = 0
   while index < args.length() {
     let arg = args[index]
@@ -112,6 +122,27 @@ fn parse_invocation(args : Array[String]) -> Result[Invocation, String] {
           Ok(other) => return Err("unknown reason: \{other}")
           Err(error) => return Err(error)
         }
+      "--kinds" =>
+        match value() {
+          Ok(chosen) =>
+            match @domain.WatchOptions::default().with_kinds(chosen) {
+              Ok(_) => kinds = chosen
+              Err(error) => return Err(error)
+            }
+          Err(error) => return Err(error)
+        }
+      "--release-notify" =>
+        match value() {
+          Ok(chosen) =>
+            if @domain.ReleaseNotify::parse(chosen) is Some(_) {
+              release_notify = chosen
+            } else {
+              return Err(
+                "--release-notify must be all, major-minor, major, or off, not \{chosen}",
+              )
+            }
+          Err(error) => return Err(error)
+        }
       _ =>
         if arg.has_prefix("--") {
           return Err("unknown option: \{arg}")
@@ -133,6 +164,9 @@ fn parse_invocation(args : Array[String]) -> Result[Invocation, String] {
   if !commands_with_arguments.contains(command) && !arguments.is_empty() {
     return Err("\{command} takes no arguments")
   }
+  if (kinds != "" || release_notify != "") && command != "watch" {
+    return Err("--kinds and --release-notify apply to watch only")
+  }
   Ok({
     command,
     arguments,
@@ -143,6 +177,8 @@ fn parse_invocation(args : Array[String]) -> Result[Invocation, String] {
     repository,
     query,
     reason,
+    kinds,
+    release_notify,
   })
 }
 
@@ -158,6 +194,8 @@ fn help_invocation() -> Invocation {
     repository: "",
     query: "",
     reason: "",
+    kinds: "",
+    release_notify: "",
   }
 }
 

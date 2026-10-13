@@ -31,7 +31,24 @@ fn serialize_rows(
     match row {
       GroupHeader(repository) => "G\t\{repository}"
       Item(item, read~, saved~, nested~) => {
-        let kind = if item.kind is PullRequest { "pr" } else { "issue" }
+        let kind = match item.kind {
+          PullRequest => "pr"
+          Issue => "issue"
+          Release => "release"
+        }
+        // A release row shows its tag where other rows show the number, the
+        // first sentence of its notes after the name, and the draft flag
+        // marks a pre-release.
+        let (number, draft, title) = if item.kind is Release {
+          let title = if item.summary == "" {
+            item.title
+          } else {
+            "\{item.title}  \{item.summary}"
+          }
+          (item.tag, item.prerelease, title)
+        } else {
+          (item.number.to_string(), item.draft, item.title)
+        }
         let fresh_age = match fresh_since.get(item.url) {
           Some(since) => (now - since).to_string()
           None => "-1"
@@ -40,10 +57,10 @@ fn serialize_rows(
           "I",
           item.url,
           item.repository,
-          item.number.to_string(),
+          safe_row_text(number),
           kind,
-          flag(item.draft),
-          safe_row_text(item.title),
+          flag(draft),
+          safe_row_text(title),
           item.author,
           @domain.short_date(item.updated_at),
           item.updated_at,
@@ -76,8 +93,17 @@ fn serialize_rows(
 }
 
 ///|
-fn repositories_text(repositories : Array[@domain.RepositoryRef]) -> String {
-  repositories.map(repository => repository.key()).join("\n")
+/// One line per watched repository: name, kinds, release notification.
+fn repositories_text(
+  repositories : Array[@domain.RepositoryRef],
+  options : Map[String, @domain.WatchOptions],
+) -> String {
+  repositories
+  .map(repository => {
+    let entry = @domain.watch_options_for(options, repository.key())
+    "\{repository.key()}\t\{entry.kinds_text()}\t\{entry.release_notify.name()}"
+  })
+  .join("\n")
 }
 
 ///|

@@ -6,8 +6,9 @@ Repository code is the source of truth for behavior, accessibility, security, pl
 |---|---|---|
 | `inbox` | Inbox | Open issues and pull requests from watched repositories, grouped by repository, with kind, repository, and text filters |
 | `for-you` | For you | Review requests, assignments, mentions, and subscriptions from watched repositories, merged across every saved credential and deduplicated by activity URL, with a reason filter |
-| `saved` | Saved | Activities saved for later, kept independently of their done state |
-| `repositories` | Repositories | Watch by name, watch from account suggestions, and unwatch |
+| `releases` | Releases | Releases of watched repositories that choose Releases, newest first, with repository and text filters |
+| `saved` | Saved | Activities and releases saved for later, kept independently of their done state |
+| `repositories` | Repositories | Watch by name, watch from account suggestions, unwatch, and choose what each watched repository brings in |
 | `settings` | Settings | Personal access tokens (default and owner/organization scopes), auto refresh, which merged or closed mentions to include and how many days back, and the local data location. The page scrolls when it is taller than the window. Cmd+, (Ctrl+, on Windows) opens it while no dialog is open |
 | `onboarding` | First launch | Shown on activity pages while no token is saved: connect GitHub, then watch repositories |
 | `pat-dialog` | Personal access token dialog | Add or replace a token; verifies it with GitHub before saving |
@@ -28,6 +29,8 @@ GitHub's mention filter misses mentions in review comments on pull request diffs
 
 Mentioned lists open items only by default. In Settings, `Include merged pull requests` and `Include closed issues and pull requests` add those kinds when they were updated within the look-back (`mentions.include_merged`, `mentions.include_closed`, and `mentions.days` in `settings.txt`, see `docs/cli.md`). They come from both the mention filter and review comments and carry a neutral `Merged` or `Closed` label after their reasons. A typed look-back applies when the field loses focus; the step buttons apply at once.
 
+Release rows on Releases show the release name and the first sentence of its notes, then the repository, the tag, `@author`, and `released <date>`, with a `Pre-release` label for pre-releases. Drafts are not listed.
+
 Every row has explicit trailing actions: `Open`, `Done` (or `Move to inbox` for done rows), a Save toggle, and a More actions button. The menu holds `Copy link`, `Show only this repository`, and, separated below them, `Unsubscribe`. Row click and double click are not actions.
 
 In Inbox, two or more updates from `dependabot[bot]` or `renovate[bot]` in one repository collapse into one row with `Show N` / `Hide` and `Done all`.
@@ -43,6 +46,14 @@ Done, Move to inbox, Done all, Save, Unsubscribe, and Unwatch confirm the result
 Done state persists in the read-state store; saved and muted URLs persist in the triage store. The app checks these files and the watched repository list every two seconds and reloads any that changed outside it, for example through `ghclient` (`docs/cli.md`).
 
 Repository API calls resolve their credential automatically: an exact owner scope first, then the credential whose accessible repository list contains the repository, then the credential whose accessible list contains the owner, and finally the default credential. Repository suggestions are fetched with every saved credential and merged by full name. Suggestions with review requests for the viewer are listed first.
+
+## Watch options
+
+Each watched repository chooses what it brings in: `Pull requests`, `Issues`, `Releases`, and `For you`. Repositories start with pull requests, issues, and For you; Repositories shows a toggle per kind under each name. A kind switched off disappears at once. For you lists review requests, assignments, mentions, and subscriptions only from repositories that choose it.
+
+A repository that chooses Releases also picks which releases notify: `All releases`, `Major and minor` (the default), `Major only`, or `No notifications`. The level comes from the tag: `x.0.0` is major, `x.y.0` minor, anything else patch, and a tag without a version counts as minor. Pre-releases notify only with `All releases`. Releases lists every release whatever the choice. When a repository starts bringing in releases, those published more than 30 days earlier start as done.
+
+The options persist in `repositories.txt`, version 2: one repository per line with its kinds and release notification, separated by tabs. Version 1 files load with the defaults. Decisions are in ADR 0006.
 
 ## Empty and error states
 
@@ -60,11 +71,14 @@ Requests go out only for what a change affects. For you is fetched across all re
 | Trigger | What is fetched | Blocks the window |
 |---|---|---|
 | Launch, adding or removing a token, a banner's `Retry` | Every token's accessible repositories, then Inbox; For you alongside | Skeleton rows on first launch; the loading dialog otherwise |
-| `Refresh` on Inbox | Inbox: open pull requests and issues of every watched repository | Loading dialog |
+| `Refresh` on Inbox | Inbox and Releases: the chosen kinds of every watched repository | Loading dialog |
 | `Refresh` on For you | For you | Loading dialog |
 | `Refresh` on Saved | Inbox and For you | Loading dialog |
-| Auto refresh, every 5 minutes | Inbox and For you | No |
-| Watch, including undoing an Unwatch | The repository's open pull requests and issues, the mentions in its review comments, and merged or closed mentions | No |
+| `Refresh` on Releases | Inbox and Releases | Loading dialog |
+| Auto refresh, every 5 minutes | Inbox, Releases, and For you | No |
+| Watch, including undoing an Unwatch | The kinds the repository chooses: open pull requests, open issues, the newest 30 releases, and, with For you, the mentions in its review comments and merged or closed mentions | No |
+| Choosing a kind a repository did not bring in | The same, for that repository | No |
+| Switching a kind off, or changing the release notification | Nothing | No |
 | Repositories watched outside the app, for example by `ghclient watch` | The same, for the added repositories | No |
 | Unwatch | Nothing | No |
 | Mention settings, in Settings or `settings.txt` | Merged and closed mentions, and mentions in review comments of every watched repository | No |

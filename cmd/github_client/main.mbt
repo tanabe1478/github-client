@@ -129,6 +129,11 @@ async fn post_notification(
   }
   if status != 0 {
     println("notification: osascript exited with \{status}")
+  } else {
+    // Scripts and AI agents read this to confirm what was announced.
+    println(
+      "notification: posted title=\{title} subtitle=\{subtitle} body=\{body}",
+    )
   }
 }
 
@@ -144,7 +149,15 @@ async fn notify_fresh_activities(
   if fresh.length() <= 3 {
     for entry in fresh {
       let (activity, reason) = entry
-      let subtitle = "#\{activity.number()} \{activity.title()}"
+      let subtitle = if activity.kind() is Release {
+        if activity.summary() == "" {
+          activity.title()
+        } else {
+          "\{activity.title()} \{activity.summary()}"
+        }
+      } else {
+        "#\{activity.number()} \{activity.title()}"
+      }
       if reason == "" {
         post_notification(
           activity.repository(),
@@ -202,18 +215,26 @@ async fn open_in_browser(url : String) -> Bool {
 async fn main {
   println("github-client: starting GLFW + Dear ImGui host")
   let mut model = @domain.Model::new()
-  match @repository_store.load_default() {
-    Ok(repositories) =>
+  // What each watched repository brings in, by repository key. Entries
+  // stay after Unwatch so undoing it restores them.
+  let watch_options : Map[String, @domain.WatchOptions] = Map([])
+  match @repository_store.load_default_entries() {
+    Ok((repositories, options)) => {
       for repository in repositories {
         model = @domain.update(
           model,
           @domain.Msg::RegisterRepository(repository),
         )
       }
+      for key, entry in options {
+        watch_options.set(key, entry)
+      }
+    }
     Err(error) => println("repository-store: load failed: \{error}")
   }
   let pull_requests : Array[@github_api.ActivitySummary] = []
   let issues : Array[@github_api.ActivitySummary] = []
+  let releases : Array[@github_api.ActivitySummary] = []
   let suggested_repositories : Array[@github_api.RepositorySummary] = []
   let review_requests : Array[@github_api.ActivitySummary] = []
   let assignments : Array[@github_api.ActivitySummary] = []
@@ -371,7 +392,9 @@ async fn main {
     match
       find_activity(url, [
         pull_requests, issues, review_requests, assignments, mentions, subscriptions,
+        releases,
       ]) {
+      Some(activity) if activity.kind() is Release => activity.tag()
       Some(activity) => "#\{activity.number()}"
       None => "the item"
     }
@@ -442,6 +465,7 @@ async fn main {
   async fn fetch_watched(
     next_pull_requests : Array[@github_api.ActivitySummary],
     next_issues : Array[@github_api.ActivitySummary],
+    next_releases : Array[@github_api.ActivitySummary],
   ) -> Unit {
     repository_failures.clear()
     watched_incomplete.clear()
@@ -456,6 +480,8 @@ async fn main {
       repository_failures,
       () => loading_done += 1,
       incomplete=watched_incomplete,
+      options=watch_options,
+      releases=next_releases,
     )
   }
 
@@ -463,11 +489,12 @@ async fn main {
     generation : Int,
     next_pull_requests : Array[@github_api.ActivitySummary],
     next_issues : Array[@github_api.ActivitySummary],
+    next_releases : Array[@github_api.ActivitySummary],
   ) -> Unit {
     if generation != active_generation {
       return
     }
-    mark_fresh([next_pull_requests, next_issues])
+    mark_fresh([next_pull_requests, next_issues, next_releases])
     // A repository removed while the fetch was running stays removed.
     let watched = model.repositories()
     @activity_sync.replace_activities(
@@ -482,8 +509,23 @@ async fn main {
         @domain.repository_is_watched(watched, activity.repository())
       }),
     )
+    @activity_sync.replace_activities(
+      releases,
+      next_releases.filter(activity => {
+        @domain.repository_is_watched(watched, activity.repository())
+      }),
+    )
     has_loaded = true
     last_synced = Some(imgui_now())
+  }
+
+  fn save_watched() -> Result[Unit, String] {
+    @repository_store.save_default(model.repositories(), watch_options)
+  }
+
+  // Watched repositories whose options include For you.
+  fn for_you_watched() -> Array[@domain.RepositoryRef] {
+    @domain.for_you_repositories(model.repositories(), watch_options)
   }
 
   fn closed_mention_options() -> @activity_sync.ClosedMentions? {
@@ -544,7 +586,7 @@ async fn main {
             incomplete=personal_incomplete,
           )
         },
-        async fn() { fetch_extras(model.repositories(), extras) },
+        async fn() { fetch_extras(for_you_watched(), extras) },
       ]),
     )
     let follow_up = @activity_sync.follow_up_review_requests(
@@ -598,10 +640,11 @@ async fn main {
     commit_personal(generation, next, extras, kept_urls)
   }
 
-  // Newly watched repositories: their pull requests and issues, and the
-  // mentions in their review comments. For you needs nothing else, because
-  // it is fetched across all repositories and narrowed to the watched ones
-  // when shown.
+  // Repositories just watched, or whose options gained a kind: the kinds
+  // they choose, and the mentions in their review comments when they choose
+  // For you. For you needs nothing else, because it is fetched across all
+  // repositories and narrowed to the chosen ones when shown. Nothing found
+  // here notifies, and releases older than 30 days start as done.
   async fn load_added(
     generation : Int,
     repositories : Array[@domain.RepositoryRef],
@@ -610,6 +653,7 @@ async fn main {
     loading_detail = repositories.map(repository => repository.key()).join(", ")
     let next_pull_requests = []
     let next_issues = []
+    let next_releases = []
     let failures : Map[String, String] = Map([])
     let extras = []
     ignore(
@@ -625,9 +669,16 @@ async fn main {
             failures,
             () => loading_done += 1,
             incomplete=watched_incomplete,
+            options=watch_options,
+            releases=next_releases,
           )
         },
-        async fn() { fetch_extras(repositories, extras) },
+        async fn() {
+          fetch_extras(
+            @domain.for_you_repositories(repositories, watch_options),
+            extras,
+          )
+        },
       ]),
     )
     if generation != active_generation {
@@ -642,21 +693,42 @@ async fn main {
         Some(error) => repository_failures.set(key, error)
         None => repository_failures.remove(key)
       }
-      @activity_sync.replace_activities(
-        pull_requests,
-        @activity_sync.without_repository(pull_requests, key),
-      )
-      @activity_sync.replace_activities(
-        issues,
-        @activity_sync.without_repository(issues, key),
-      )
+      for list in [pull_requests, issues, releases] {
+        @activity_sync.replace_activities(
+          list,
+          @activity_sync.without_repository(list, key),
+        )
+      }
     }
     let kept = (activity : @github_api.ActivitySummary) => {
       @domain.repository_is_watched(watched, activity.repository())
     }
-    mark_fresh([next_pull_requests, next_issues, extras])
+    let cutoff = @activity_sync.utc_days_ago(@async.now(), 30)
+    let mut marked = false
+    for release in next_releases {
+      let url = release.html_url()
+      if release.updated_at() < cutoff &&
+        !read_markers.any(marker => marker.url() == url) {
+        read_markers = @domain.mark_activity_read(
+          read_markers,
+          url,
+          release.updated_at(),
+        )
+        marked = true
+      }
+    }
+    if marked {
+      save_read_markers()
+    }
+    mark_fresh([next_pull_requests, next_issues, next_releases, extras])
+    for list in [next_pull_requests, next_issues, next_releases, extras] {
+      for activity in list {
+        seen_revisions.set(activity.html_url(), activity.updated_at())
+      }
+    }
     pull_requests.append(next_pull_requests.filter(kept))
     issues.append(next_issues.filter(kept))
+    releases.append(next_releases.filter(kept))
     @activity_sync.append_unique_activities(mention_extras, extras.filter(kept))
     combine_mentions()
   }
@@ -675,7 +747,7 @@ async fn main {
       personal_incomplete.remove(key)
     }
     let extras = []
-    fetch_extras(model.repositories(), extras)
+    fetch_extras(for_you_watched(), extras)
     loading_done += 1
     if generation != active_generation {
       return
@@ -688,8 +760,9 @@ async fn main {
   async fn load_watched(generation : Int) -> Unit {
     let next_pull_requests = []
     let next_issues = []
-    fetch_watched(next_pull_requests, next_issues)
-    commit_watched(generation, next_pull_requests, next_issues)
+    let next_releases = []
+    fetch_watched(next_pull_requests, next_issues, next_releases)
+    commit_watched(generation, next_pull_requests, next_issues, next_releases)
   }
 
   async fn load_suggestions_then_watched(generation : Int) -> Unit {
@@ -749,7 +822,7 @@ async fn main {
           model,
           @domain.Msg::RegisterRepository(repository),
         )
-        match @repository_store.save_default(model.repositories()) {
+        match save_watched() {
           Ok(_) => println("ui-action: repository.register")
           Err(error) => println("repository-store: save failed: \{error}")
         }
@@ -842,13 +915,16 @@ async fn main {
         loading_total = saved_tokens.length() + model.repositories().length()
         let next_pull_requests = []
         let next_issues = []
+        let next_releases = []
         let next_personal = [[], [], [], [], []]
         let next_extras = []
         let mut kept_urls : Array[String] = []
         scope_failures.clear()
         ignore(
           @async.all([
-            async fn() { fetch_watched(next_pull_requests, next_issues) },
+            async fn() {
+              fetch_watched(next_pull_requests, next_issues, next_releases)
+            },
             async fn() {
               kept_urls = fetch_personal(next_personal, next_extras)
             },
@@ -856,7 +932,7 @@ async fn main {
         )
         // Compare against the seen revisions before committing: every frame
         // records visible items as seen.
-        let watched = model.repositories()
+        let watched = for_you_watched()
         let fresh : Array[(@github_api.ActivitySummary, String)] = []
         let fresh_urls : Map[String, Bool] = Map([])
         let reasons = [
@@ -868,6 +944,19 @@ async fn main {
         }
         for activity in next_issues {
           candidates.push((activity, ""))
+        }
+        // Releases notify as each repository's options choose.
+        for activity in next_releases {
+          let options = @domain.watch_options_for(
+            watch_options,
+            activity.repository(),
+          )
+          if options.release_notify.notifies(
+              @domain.release_level(activity.tag()),
+              prerelease=activity.is_prerelease(),
+            ) {
+            candidates.push((activity, ""))
+          }
         }
         for index, activities in next_personal {
           for activity in activities {
@@ -893,7 +982,9 @@ async fn main {
         if generation != active_generation {
           return
         }
-        commit_watched(generation, next_pull_requests, next_issues)
+        commit_watched(
+          generation, next_pull_requests, next_issues, next_releases,
+        )
         commit_personal(generation, next_personal, next_extras, kept_urls)
         println("auto-refresh: fresh=\{fresh.length()}")
         notify_fresh_activities(fresh)
@@ -954,7 +1045,7 @@ async fn main {
     for
       activities in [
         pull_requests, issues, review_requests, assignments, mentions, subscriptions,
-        kept_review_requests,
+        kept_review_requests, releases,
       ] {
       for activity in activities {
         keep.set(activity.html_url(), true)
@@ -1034,11 +1125,13 @@ async fn main {
         last_control_poll = now
         poll_control_commands(control_path, control_queue, [
           pull_requests, issues, review_requests, assignments, mentions, subscriptions,
+          releases,
         ])
       }
       for
         activities in [
           pull_requests, issues, review_requests, assignments, mentions, subscriptions,
+          releases,
         ] {
         for activity in activities {
           seen_revisions.set(activity.html_url(), activity.updated_at())
@@ -1078,8 +1171,8 @@ async fn main {
         let repositories = read_text(repositories_path)
         if repositories != known_repositories {
           known_repositories = repositories
-          match @repository_store.decode(repositories) {
-            Ok(next) => {
+          match @repository_store.decode_entries(repositories) {
+            Ok((next, next_options)) => {
               let previous = model.repositories()
               for repository in previous {
                 if !next.any(entry => entry.key() == repository.key()) {
@@ -1087,28 +1180,32 @@ async fn main {
                     model,
                     @domain.Msg::RemoveRepository(repository.key()),
                   )
-                  @activity_sync.replace_activities(
-                    pull_requests,
-                    @activity_sync.without_repository(
-                      pull_requests,
-                      repository.key(),
-                    ),
-                  )
-                  @activity_sync.replace_activities(
-                    issues,
-                    @activity_sync.without_repository(issues, repository.key()),
-                  )
+                  for list in [pull_requests, issues, releases] {
+                    @activity_sync.replace_activities(
+                      list,
+                      @activity_sync.without_repository(list, repository.key()),
+                    )
+                  }
                 }
               }
+              // New repositories, and repositories that now choose a kind
+              // they did not, need a fetch.
               let added : Array[@domain.RepositoryRef] = []
               for repository in next {
-                if !previous.any(entry => entry.key() == repository.key()) {
+                let key = repository.key()
+                let entry = @domain.watch_options_for(next_options, key)
+                if !previous.any(item => item.key() == key) {
                   model = @domain.update(
                     model,
                     @domain.Msg::RegisterRepository(repository),
                   )
                   added.push(repository)
+                } else if @domain.watch_options_for(watch_options, key).gains(
+                    entry,
+                  ) {
+                  added.push(repository)
                 }
+                watch_options.set(key, entry)
               }
               if !added.is_empty() && !saved_tokens.is_empty() {
                 pending_jobs.push(External(added))
@@ -1260,8 +1357,26 @@ async fn main {
       let page = model.page()
       let filter = imgui_view_filter()
       let watched = model.repositories()
+      // A kind switched off hides at once; its data goes on the next fetch.
+      let chosen = (
+        activity : @github_api.ActivitySummary,
+        pick : (@domain.WatchOptions) -> Bool,
+      ) => pick(@domain.watch_options_for(watch_options, activity.repository()))
       let inbox_items = @activity_sync.watched_items(
-        [pull_requests, issues],
+        [
+          pull_requests.filter(activity => {
+            chosen(activity, options => options.pull_requests)
+          }),
+          issues.filter(activity => chosen(activity, options => options.issues)),
+        ],
+        muted_urls,
+      )
+      let release_items = @activity_sync.watched_items(
+        [
+          releases.filter(activity => {
+            chosen(activity, options => options.releases)
+          }),
+        ],
         muted_urls,
       )
       let for_you_items = @activity_sync.personal_items(
@@ -1269,7 +1384,7 @@ async fn main {
         assignments,
         mentions,
         subscriptions,
-        watched,
+        for_you_watched(),
         muted_urls,
         watched_only=true,
         kept_review_requests~,
@@ -1303,13 +1418,30 @@ async fn main {
             ),
             true,
           )
+        Releases =>
+          (
+            @domain.build_activity_rows(
+              release_items,
+              read_lookup,
+              saved_urls,
+              {
+                ..@domain.ActivityFilter::default(),
+                repository: filter.repository,
+                query: filter.query,
+                show_done: filter.show_done,
+              },
+              expanded_bundles,
+              Flat,
+            ),
+            true,
+          )
         Saved =>
           (
             @domain.build_activity_rows(
               @activity_sync.saved_items(
                 [
                   pull_requests, issues, review_requests, assignments, mentions,
-                  subscriptions,
+                  subscriptions, releases,
                 ],
                 saved_urls,
                 muted_urls,
@@ -1333,6 +1465,9 @@ async fn main {
       let for_you_unread = @activity_sync.unread_count(
         for_you_items, read_lookup,
       )
+      let releases_unread = @activity_sync.unread_count(
+        release_items, read_lookup,
+      )
       let header = match page {
         Inbox | PullRequests | Issues => {
           let noun = if watched.length() == 1 {
@@ -1345,13 +1480,24 @@ async fn main {
         ForYou =>
           "\{for_you_unread} unread of \{for_you_items.length()} · review requests, assignments, mentions, and subscriptions in watched repositories"
         Saved => "Kept here until you remove them, even after Done"
+        Releases => {
+          let count = watched
+            .filter(repository => {
+              @domain.watch_options_for(watch_options, repository.key()).releases
+            })
+            .length()
+          let noun = if count == 1 { "repository" } else { "repositories" }
+          "\{releases_unread} unread of \{release_items.length()} · releases from \{count} watched \{noun}"
+        }
         Repositories =>
-          "Inbox and For you show activity from these repositories only."
+          "Choose what each watched repository brings into Inbox, For you, and Releases."
         Settings => "Accounts and sync"
       }
-      let has_data = !inbox_items.is_empty() || !for_you_items.is_empty()
+      let has_data = !inbox_items.is_empty() ||
+        !for_you_items.is_empty() ||
+        !release_items.is_empty()
       let banners = match page {
-        Inbox | PullRequests | Issues | ForYou | Saved => {
+        Inbox | PullRequests | Issues | ForYou | Saved | Releases => {
           let problems = problem_banners(
             scope_failures,
             broken_scopes,
@@ -1415,10 +1561,10 @@ async fn main {
         loading_done,
         loading_total,
         flags,
-        "\{inbox_unread}\t\{for_you_unread}\t\{watched.length()}\t\{authenticated_login}\t\{data_directory}",
+        "\{inbox_unread}\t\{for_you_unread}\t\{watched.length()}\t\{authenticated_login}\t\{data_directory}\t\{releases_unread}",
         "\{safe_row_text(header)}\t\{synced_label(last_synced, now)}",
         serialize_rows(rows, show_repository, fresh_since, now),
-        repositories_text(watched),
+        repositories_text(watched, watch_options),
         suggestions_text(
           suggested_repositories,
           watched,
@@ -1515,18 +1661,14 @@ async fn main {
           match @domain.RepositoryRef::parse(key) {
             Ok(repository) => {
               model = @domain.update(model, @domain.Msg::RemoveRepository(key))
-              @activity_sync.replace_activities(
-                pull_requests,
-                @activity_sync.without_repository(pull_requests, key),
-              )
-              @activity_sync.replace_activities(
-                issues,
-                @activity_sync.without_repository(issues, key),
-              )
+              for list in [pull_requests, issues, releases] {
+                @activity_sync.replace_activities(
+                  list,
+                  @activity_sync.without_repository(list, key),
+                )
+              }
               repository_failures.remove(key)
-              let saved_repositories = @repository_store.save_default(
-                model.repositories(),
-              )
+              let saved_repositories = save_watched()
               remember_files()
               match saved_repositories {
                 Ok(_) => {
@@ -1718,9 +1860,68 @@ async fn main {
         }
         15 => model = @domain.update(model, @domain.Msg::Navigate(ForYou))
         16 => model = @domain.update(model, @domain.Msg::Navigate(Saved))
+        17 => model = @domain.update(model, @domain.Msg::Navigate(Releases))
+        // The control file's auto-refresh: the same job the timer starts,
+        // which posts notifications.
+        35 =>
+          if !saved_tokens.is_empty() && !pending_jobs.any(job => job is Auto) {
+            last_auto_refresh = now
+            pending_jobs.push(Auto)
+          }
+        // Watch options: the key is "toggle:<kind>", "kinds:<kinds>", or
+        // "notify:<level>".
+        34 => {
+          let key = github_client_imgui_take_selected_repository()
+          let change = github_client_imgui_take_key()
+          if !@domain.repository_is_watched(model.repositories(), key) {
+            notify("\{key} is not watched.", None)
+          } else {
+            let current = @domain.watch_options_for(watch_options, key)
+            let next = if change.has_prefix("toggle:") {
+              Ok(current.toggle(change["toggle:".length():].to_owned()))
+            } else if change.has_prefix("kinds:") {
+              current.with_kinds(change["kinds:".length():].to_owned())
+            } else if change.has_prefix("notify:") {
+              match
+                @domain.ReleaseNotify::parse(
+                  change["notify:".length():].to_owned(),
+                ) {
+                Some(level) => Ok({ ..current, release_notify: level, })
+                None => Err("unknown release notification")
+              }
+            } else {
+              Err("unknown watch option")
+            }
+            match next {
+              Ok(next) if next != current => {
+                watch_options.set(key, next)
+                match save_watched() {
+                  Ok(_) => ()
+                  Err(error) =>
+                    println("repository-store: save failed: \{error}")
+                }
+                remember_files()
+                if current.gains(next) && !saved_tokens.is_empty() {
+                  match @domain.RepositoryRef::parse(key) {
+                    Ok(repository) => pending_jobs.push(External([repository]))
+                    Err(_) => ()
+                  }
+                }
+                println(
+                  "ui-action: watch-options \{key} kinds=\{next.kinds_text()} releases=\{next.release_notify.name()}",
+                )
+              }
+              Ok(_) => ()
+              Err(error) => {
+                notify("Couldn't change \{key}: \{error}", None)
+                println("watch-options: \{key}: \{error}")
+              }
+            }
+          }
+        }
         _ => ()
       }
-      if action >= 10 && action <= 16 {
+      if action >= 10 && action <= 17 {
         println("ui-action: nav \{model.page().name()}")
       }
       if imgui_auto_refresh_enabled() &&

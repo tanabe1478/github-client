@@ -37,6 +37,7 @@ pub extend PullRequestWire with @json.FromJson::{from_json}
 pub(all) enum ActivityKind {
   Issue
   PullRequest
+  Release
 }
 
 ///|
@@ -70,6 +71,26 @@ pub struct ActivitySummary {
   kind : ActivityKind
   draft : Bool
   state : ActivityState
+  /// Releases only: the tag, the first sentence of the notes, and whether
+  /// GitHub marks it as a pre-release.
+  tag : String
+  summary : String
+  prerelease : Bool
+}
+
+///|
+pub fn ActivitySummary::tag(self : ActivitySummary) -> String {
+  self.tag
+}
+
+///|
+pub fn ActivitySummary::summary(self : ActivitySummary) -> String {
+  self.summary
+}
+
+///|
+pub fn ActivitySummary::is_prerelease(self : ActivitySummary) -> Bool {
+  self.prerelease
 }
 
 ///|
@@ -134,6 +155,9 @@ pub fn decode_issues(
           html_url: item.html_url,
           author: item.user.login,
           updated_at: item.updated_at,
+          tag: "",
+          summary: "",
+          prerelease: false,
           kind: Issue,
           draft: false,
           state: Open,
@@ -161,6 +185,9 @@ pub fn decode_pull_requests(
         html_url: item.html_url,
         author: item.user.login,
         updated_at: item.updated_at,
+        tag: "",
+        summary: "",
+        prerelease: false,
         kind: PullRequest,
         draft: item.draft,
         state: Open,
@@ -221,6 +248,9 @@ pub fn decode_activity(
       html_url: item.html_url,
       author: item.user.login,
       updated_at: item.updated_at,
+      tag: "",
+      summary: "",
+      prerelease: false,
       kind: if item.pull_request is Some(_) {
         PullRequest
       } else {
@@ -280,6 +310,9 @@ pub fn decode_pull_request_state(
           html_url: item.html_url,
           author: item.user.login,
           updated_at: item.updated_at,
+          tag: "",
+          summary: "",
+          prerelease: false,
           kind: PullRequest,
           draft: item.draft,
           state: if item.merged {

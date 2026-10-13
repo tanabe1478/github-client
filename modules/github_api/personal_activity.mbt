@@ -44,6 +44,9 @@ fn personal_activity_from_wire(
     html_url: item.html_url,
     author: item.user.login,
     updated_at: item.updated_at,
+    tag: "",
+    summary: "",
+    prerelease: false,
     kind: if item.pull_request is Some(_) {
       PullRequest
     } else {

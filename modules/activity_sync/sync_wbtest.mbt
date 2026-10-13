@@ -80,3 +80,18 @@ test "closed_mentions keeps open items and only the chosen closed states" {
     [true, false, true],
   )
 }
+
+///|
+test "release URLs give the repository and the tag" {
+  guard parse_release_url("https://github.com/pnpm/pnpm/releases/tag/v12.12.1")
+    is Some((repository, tag)) else {
+    fail("expected a release URL")
+  }
+  assert_eq(repository.key(), "pnpm/pnpm")
+  assert_eq(tag, "v12.12.1")
+  assert_true(
+    parse_release_url("https://github.com/pnpm/pnpm/releases") is None,
+  )
+  assert_true(is_activity_url("https://github.com/owner/app/issues/3"))
+  assert_false(is_activity_url("https://github.com/owner/app/commit/abc"))
+}

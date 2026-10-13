@@ -9,17 +9,18 @@ Install it on macOS with `scripts/macos/install-cli.sh` (default destination `~/
 | Command | What it does |
 |---|---|
 | `inbox [--kind all\|pr\|issue] [--repo OWNER/NAME] [--query TEXT] [--all]` | Open pull requests and issues in watched repositories |
-| `for-you [--reason REASON] [--all]` | Review requests, assignments, mentions, and subscriptions in watched repositories |
+| `for-you [--reason REASON] [--all]` | Review requests, assignments, mentions, and subscriptions in watched repositories that choose For you |
+| `releases [--repo OWNER/NAME] [--query TEXT] [--all]` | Releases of watched repositories that choose Releases |
 | `saved` | Saved items, done or not |
 | `done <url>...` | Mark items done at their current GitHub revision |
 | `undone <url>...` | Move items back to the inbox |
 | `save <url>...` / `unsave <url>...` | Save or unsave items |
 | `mute <url>...` / `unmute <url>...` | Hide items everywhere, or show them again |
-| `repos` | Watched repositories |
-| `watch <owner/name>...` / `unwatch <owner/name>...` | Change watched repositories |
+| `repos` | Watched repositories and what each brings in |
+| `watch <owner/name>... [--kinds KINDS] [--release-notify LEVEL]` / `unwatch <owner/name>...` | Change watched repositories. `--kinds` takes a comma-separated list of `pull-requests`, `issues`, `releases`, and `for-you`; `--release-notify` takes `all`, `major-minor`, `major`, or `off`. Without them, a new repository gets pull requests, issues, and For you, and a watched one keeps its options |
 | `accounts` | Saved token scopes and their logins; never the tokens |
 
-Activity commands fetch from GitHub on every call and hide done items unless `--all` is given. `--query` matches the title, `#number`, or `@author`, as the app's filter does. Reasons are `Review requested`, `Assigned`, `Mentioned`, and `Subscribed`. A review request GitHub removed after a teammate reviewed for the team stays until you review or the pull request closes; it carries both `Review requested` and `Still needs your review`. `for-you` shares that list with the app (`review-requests.txt`). Item URLs are `https://github.com/OWNER/NAME/pull/N` or `.../issues/N`.
+Activity commands fetch from GitHub on every call and hide done items unless `--all` is given. `--query` matches the title, `#number`, or `@author`, as the app's filter does. Reasons are `Review requested`, `Assigned`, `Mentioned`, and `Subscribed`. A review request GitHub removed after a teammate reviewed for the team stays until you review or the pull request closes; it carries both `Review requested` and `Still needs your review`. `for-you` shares that list with the app (`review-requests.txt`). Item URLs are `https://github.com/OWNER/NAME/pull/N`, `.../issues/N`, or `.../releases/tag/TAG`.
 
 ## Settings
 
@@ -63,7 +64,7 @@ Activity commands:
 }
 ```
 
-Items are sorted newest first. Lists are read to their last page (up to 2,000 open pull requests and 2,000 open issues per repository, 1,000 per For you source); a list that reaches its limit is named in `warnings`. `kind` is `pull_request` or `issue`; `reasons` is filled for `for-you`. `draft` is always `false` for items fetched one by one (`saved`), because that endpoint does not report it.
+Items are sorted newest first. Lists are read to their last page (up to 2,000 open pull requests and 2,000 open issues per repository, 1,000 per For you source); a list that reaches its limit is named in `warnings`. `kind` is `pull_request`, `issue`, or `release`; release items also carry `tag`, `summary` (the first sentence of the notes), and `prerelease`, and their `updated_at` is the publication date; `reasons` is filled for `for-you`. `draft` is always `false` for items fetched one by one (`saved`), because that endpoint does not report it.
 
 Commands that change state:
 
@@ -73,7 +74,7 @@ Commands that change state:
 
 A failed target has `"ok": false` and an `"error"` message; the other targets are still applied.
 
-`repos` prints `{"repositories": ["owner/name", ...]}` and `accounts` prints `{"accounts": [{"scope", "login"}], "errors": [...]}`.
+`repos` prints `{"repositories": ["owner/name", ...], "options": [{"repository", "kinds": [...], "release_notify"}]}` and `accounts` prints `{"accounts": [{"scope", "login"}], "errors": [...]}`.
 
 ## Exit codes
 

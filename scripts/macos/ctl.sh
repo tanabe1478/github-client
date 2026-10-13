@@ -17,12 +17,18 @@ commands:
   done <url>            mark the activity done / restore it to the inbox
   save <url>            save / unsave the activity
   unsub <url>           mute the activity locally (no GitHub API call)
-  nav <page>            inbox|for-you|saved|pull-requests|issues|repositories|settings
+  nav <page>            inbox|for-you|releases|saved|pull-requests|issues|repositories|settings
   watch <owner/repo>    register a watched repository
   unwatch <owner/repo>  stop watching a repository
+  watch-kinds <owner/repo> <kinds>
+                        what a watched repository brings in, comma separated:
+                        pull-requests,issues,releases,for-you
+  release-notify <owner/repo> all|major-minor|major|off
+                        which releases of a watched repository notify
   refresh               refresh watched activity
   refresh-for-you       refresh personal activity only
   refresh-all           refresh watched and personal activity
+  auto-refresh          run the auto refresh now; it posts notifications
   show-done 0|1         toggle the "Show done" filter
   kind all|pr|issue     Inbox kind filter
   repo <owner/repo|all> Inbox repository filter
@@ -54,7 +60,13 @@ case "$1" in
       usage
     fi
     ;;
-  refresh|refresh-for-you|refresh-all|undo|cancel|token-dialog|search|quit)
+  watch-kinds|release-notify)
+    if [[ $# -lt 3 ]]; then
+      echo "$1 requires a repository and a value" >&2
+      usage
+    fi
+    ;;
+  refresh|refresh-for-you|refresh-all|auto-refresh|undo|cancel|token-dialog|search|quit)
     ;;
   show-done)
     ;;
