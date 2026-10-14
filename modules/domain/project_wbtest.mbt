@@ -392,3 +392,39 @@ test "a newer release outside a range in the same major line is newer" {
   ])
   assert_eq(allowed[0].kind, InUse)
 }
+
+///|
+test "watch candidates are repositories known without a registry" {
+  let infra = {
+    ..service_profile(),
+    name: "acme/infra",
+    tools: [
+      {
+        name: "actions/checkout",
+        version: "4",
+        exact: false,
+        source: ".github/workflows/ci.yml uses",
+      },
+      {
+        name: "hashicorp/terraform-provider-aws",
+        version: "~> 5.0",
+        exact: false,
+        source: "terraform.tf required_providers",
+      },
+      {
+        name: "@acme/ui",
+        version: "^1.0.0",
+        exact: false,
+        source: "package.json dependencies",
+      },
+    ],
+  }
+  let candidates = watch_candidates([service_profile(), web_profile(), infra], [
+    "Gradle/Gradle",
+  ])
+  assert_eq(candidates.map(entry => entry.repository), [
+    "actions/checkout", "hashicorp/terraform-provider-aws", "pnpm/pnpm", "spring-projects/spring-boot",
+  ])
+  assert_eq(candidates[3].projects, ["acme/service"])
+  assert_eq(candidates[3].uses, ["acme/service: 3.4.2"])
+}

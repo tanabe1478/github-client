@@ -659,6 +659,38 @@ async fn run(invocation : Invocation) -> Int {
         relations=Some(relations),
       )
     }
+    "watch-candidates" => {
+      let (session, _) = load_session()
+      let profiles = session.fetch_profiles()
+      let (watched, _) = load_watch_entries()
+      let candidates = @domain.watch_candidates(
+        profiles,
+        watched.map(repository => repository.key()),
+      )
+      if invocation.json {
+        let json : Json = {
+          "candidates": candidates
+          .map(candidate => {
+            let json : Json = {
+              "repository": candidate.repository.to_json(),
+              "projects": candidate.projects.to_json(),
+              "uses": candidate.uses.to_json(),
+            }
+            json
+          })
+          .to_json(),
+        }
+        println(json.stringify())
+      } else {
+        if candidates.is_empty() {
+          println("Every repository the base projects depend on is watched.")
+        }
+        for candidate in candidates {
+          println("\{candidate.repository}  (\{candidate.uses.join(", ")})")
+        }
+      }
+      0
+    }
     "projects" => {
       let (session, _) = load_session()
       let profiles = session.fetch_profiles()

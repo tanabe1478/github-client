@@ -589,3 +589,97 @@ pub fn release_relations(
   }
   relations
 }
+
+///|
+/// A repository the base projects depend on that could be watched for its
+/// releases.
+pub(all) struct WatchCandidate {
+  /// owner/name.
+  repository : String
+  /// Base projects that use it.
+  projects : Array[String]
+  /// What each use reads, such as "acme/web: 4.4.0".
+  uses : Array[String]
+} derive(Eq, Debug)
+
+///|
+/// The repository a tool's releases come from, when that is known without
+/// asking a registry: a GitHub Action or a Terraform provider is named by
+/// its repository, and the known packages (pnpm, Spring Boot, Gradle, ...)
+/// come from the table.
+pub fn tool_repository(tool : ProjectTool) -> String? {
+  let name = tool.name
+  let parts = name.split("/").to_array()
+  if parts.length() == 2 &&
+    !name.has_prefix("@") &&
+    !name.contains(":") &&
+    parts[0] != "" &&
+    parts[1] != "" {
+    return Some(name)
+  }
+  for repository, entry in known_packages {
+    if tool_matches(name, entry.0) {
+      return Some(repository)
+    }
+  }
+  None
+}
+
+///|
+/// Repositories the base projects depend on and `watched` does not hold,
+/// the ones most projects use first.
+pub fn watch_candidates(
+  profiles : Array[ProjectProfile],
+  watched : Array[String],
+) -> Array[WatchCandidate] {
+  let watched_keys = watched.map(name => name.to_lower())
+  let found : Array[WatchCandidate] = []
+  for profile in profiles {
+    for tool in profile.tools {
+      guard tool_repository(tool) is Some(repository) else { continue }
+      guard !watched_keys.contains(repository.to_lower()) else { continue }
+      let use_ = "\{profile.name}: \{tool.version}"
+      match found.search_by(entry => entry.repository == repository) {
+        Some(index) => {
+          let entry = found[index]
+          if !entry.projects.contains(profile.name) {
+            entry.projects.push(profile.name)
+          }
+          if !entry.uses.contains(use_) {
+            entry.uses.push(use_)
+          }
+        }
+        None =>
+          found.push({ repository, projects: [profile.name], uses: [use_], })
+      }
+    }
+  }
+  found.sort_by((a, b) => {
+    let order = b.projects.length().compare(a.projects.length())
+    if order != 0 {
+      order
+    } else {
+      alphabetical(a.repository, b.repository)
+    }
+  })
+  found
+}
+
+///|
+/// Dictionary order, ignoring case; String::compare puts shorter strings
+/// first.
+fn alphabetical(a : String, b : String) -> Int {
+  let left = a.to_lower().to_array()
+  let right = b.to_lower().to_array()
+  let shorter = if left.length() < right.length() {
+    left.length()
+  } else {
+    right.length()
+  }
+  for index = 0; index < shorter; index = index + 1 {
+    if left[index] != right[index] {
+      return left[index].compare(right[index])
+    }
+  }
+  left.length().compare(right.length())
+}

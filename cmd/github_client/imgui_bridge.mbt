@@ -171,6 +171,10 @@ extern "C" fn github_client_imgui_set_view_project(value : String) -> Unit = "gi
 extern "C" fn github_client_imgui_open_why(url : String) -> Unit = "github_client_imgui_open_why"
 
 ///|
+#borrow(text)
+extern "C" fn github_client_imgui_open_watch_suggestions(text : String) -> Unit = "github_client_imgui_open_watch_suggestions"
+
+///|
 fn imgui_view_project() -> String {
   github_client_imgui_view_project()
 }

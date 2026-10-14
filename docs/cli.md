@@ -20,6 +20,7 @@ Install it on macOS with `scripts/macos/install-cli.sh` (default destination `~/
 | `watch <owner/name>... [--kinds KINDS] [--release-notify LEVEL]` / `unwatch <owner/name>...` | Change watched repositories. `--kinds` takes a comma-separated list of `pull-requests`, `issues`, `releases`, and `for-you`; `--release-notify` takes `all`, `major-minor`, `major`, or `off`. Without them, a new repository gets pull requests, issues, and For you, and a watched one keeps its options |
 | `projects` | Base projects and what was read from each |
 | `project-add <owner/name\|directory>...` / `project-remove <owner/name>...` | Change base projects. A GitHub URL is read as owner/name. A directory that exists adds every GitHub repository found in it (the `origin` of each `.git/config`, two levels down); the directory itself is not saved |
+| `watch-candidates` | Repositories the base projects depend on and you do not watch: GitHub Actions, Terraform providers, and known packages such as pnpm and Spring Boot. Watch them with `watch <owner/name> --kinds releases` |
 | `accounts` | Saved token scopes and their logins; never the tokens |
 
 Activity commands fetch from GitHub on every call and hide done items unless `--all` is given. `--query` matches the title, `#number`, or `@author`, as the app's filter does. Reasons are `Review requested`, `Assigned`, `Mentioned`, and `Subscribed`. A review request GitHub removed after a teammate reviewed for the team stays until you review or the pull request closes; it carries both `Review requested` and `Still needs your review`. `for-you` shares that list with the app (`review-requests.txt`). Item URLs are `https://github.com/OWNER/NAME/pull/N`, `.../issues/N`, or `.../releases/tag/TAG`.
@@ -94,6 +95,8 @@ Labels use the tag's version, so a milestone reads `Spring Boot 4.1.1 → 4.2.0-
 `projects` prints `{"projects": [{"repository", "package_name", "tools": [{"name", "version", "exact", "source"}], "settings": [{"key", "file"}], "files", "dependency_count", "managed", "problem", "moved_to"}]}`. `moved_to` is the new owner/name of a repository renamed on GitHub; replace it with `project-remove` and `project-add`. GitHub Actions and Terraform providers are tools named by their repository, such as `actions/checkout` and `hashicorp/terraform-provider-aws`. `managed` lists dependencies declared without a version; a tool whose `source` ends with `BOM` got its version from that BOM. `problem` is empty when the files could be read; a repository with nothing to read has no `problem` and no `tools`. Setting values in `.npmrc`, `gradle.properties`, and Spring settings are never read into the output.
 
 Without `--related`, `--project` also keeps only releases related to that project, and shows only its relations.
+
+`watch-candidates` prints `{"candidates": [{"repository", "projects", "uses"}]}`, the ones most base projects use first; `uses` reads like `"acme/web: 4.4.0"`.
 
 `repos` prints `{"repositories": ["owner/name", ...], "options": [{"repository", "kinds": [...], "release_notify"}]}` and `accounts` prints `{"accounts": [{"scope", "login"}], "errors": [...]}`.
 

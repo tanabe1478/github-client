@@ -52,6 +52,9 @@ let usage : String =
   #|                           add base projects; a directory adds every
   #|                           GitHub repository found under it
   #|  project-remove <owner/name>...
+  #|  watch-candidates         repositories the base projects depend on and
+  #|                           you do not watch; watch them with
+  #|                           watch <owner/name> --kinds releases
   #|
   #|Options:
   #|  --json   print JSON on stdout
@@ -68,7 +71,7 @@ let usage : String =
 let commands : Array[String] = [
   "inbox", "for-you", "releases", "saved", "done", "undone", "save", "unsave", "mute",
   "unmute", "repos", "watch", "unwatch", "accounts", "projects", "project-add", "project-remove",
-  "help",
+  "watch-candidates", "help",
 ]
 
 ///|

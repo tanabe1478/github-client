@@ -62,6 +62,16 @@ GitHubで改名や移動されたリポジトリは、旧名に301が返る。�
 
 lockfile（`pnpm-lock.yaml`、`package-lock.json`、`gradle.lockfile`）、SBOM、ほかのエコシステムは後の段階にする。GitHubの依存グラフ（SBOM API）は、GradleのプロジェクトではGitHub Actionsしか載っていないことがあり（dependency submissionが要る）、ここでは使わない。
 
+### 依存するリポジトリのWatch
+
+ベースプロジェクトを追加して読み終えたら、まだWatchしていない依存先のリポジトリを「Watch what your base projects use」で一覧にし、選んだものをWatchできるようにする。SettingsのBase projectsのカードの「Suggest watches」からも開ける。
+
+- 候補は外部に問い合わせずにリポジトリが分かるものだけにする。GitHub Actions、Terraformのprovider、Terraform本体、既知の対応表のパッケージ（pnpm、npm、Node.js、yarn、Spring Boot、Spring Framework、Gradle）。
+- npmとMavenの一般の依存は、registryに依存の名前を送らないとリポジトリが分からないため、候補にしない（段階4）。
+- 使っているプロジェクトの多い順に並べ、プロジェクトごとの版を添える。最初はどれも選ばない。数が多く、選ばずにWatchすると通知が増えるためである。
+- Watchしたリポジトリはリリースだけを取り込む（Pull requests、Issues、For youはオフ）。1回の取得でまとめて読む。
+- `ghclient watch-candidates`が同じ候補を出す。AIエージェントは`ghclient watch <owner/name> --kinds releases`でWatchする。
+
 ### 関連の判定
 
 項目（Releasesの行と、Watch中の依存先のissue・PR）ごとに、ベースプロジェクトごとの関連を求める。
@@ -100,7 +110,7 @@ AIにはJev、Claudeなどを選べるようにし、アプリとファイルの
 
 ## 段階
 
-1. リポジトリのベースプロジェクトとディレクトリからの一括登録、改名への追従、npm、pnpm、Gradle、Maven、GitHub Actions、Terraformのファイル（下位のディレクトリを含む）とJavaとNode.jsの版とSpringの設定の読み取り、BOMによる版の解決、決定論的な規則、Releasesでの表示と絞り込み、Settingsのカード。
+1. リポジトリのベースプロジェクトとディレクトリからの一括登録、改名への追従、依存するリポジトリのWatchの候補、npm、pnpm、Gradle、Maven、GitHub Actions、Terraformのファイル（下位のディレクトリを含む）とJavaとNode.jsの版とSpringの設定の読み取り、BOMによる版の解決、決定論的な規則、Releasesでの表示と絞り込み、Settingsのカード。
 2. AIの判断の記録（`ghclient`のコマンド）、根拠の確認、表示。
 3. lockfileとSBOMの読み取り（推移的な依存）。
 4. セキュリティ勧告、npm registryとMaven Centralでのパッケージとリポジトリの対応、Terraformのmodule、Dockerのimageとpipなどほかのエコシステム。

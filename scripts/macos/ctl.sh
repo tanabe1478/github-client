@@ -31,6 +31,9 @@ commands:
   project-remove <owner/name>
                         remove a base project
   project-rescan        read every base project again
+  suggest-watches       open "Watch what your base projects use"
+  suggest-watch <owner/name,...|all>
+                        watch suggested repositories for their releases
   project-follow <owner/name>
                         use the new name of a renamed base project
   related-only 0|1      Releases "Related only" filter
@@ -66,7 +69,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 case "$1" in
-  open|done|save|unsub|unsubscribe|nav|watch|unwatch|kind|repo|reason|expand|menu|project-add|project-remove|project-follow|related-only|project|why)
+  open|done|save|unsub|unsubscribe|nav|watch|unwatch|kind|repo|reason|expand|menu|project-add|project-remove|project-follow|suggest-watch|related-only|project|why)
     if [[ $# -lt 2 ]]; then
       echo "$1 requires an argument" >&2
       usage
@@ -78,7 +81,7 @@ case "$1" in
       usage
     fi
     ;;
-  refresh|refresh-for-you|refresh-all|auto-refresh|undo|cancel|token-dialog|search|quit|project-rescan)
+  refresh|refresh-for-you|refresh-all|auto-refresh|undo|cancel|token-dialog|search|quit|project-rescan|suggest-watches)
     ;;
   show-done)
     ;;

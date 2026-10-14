@@ -120,6 +120,12 @@ fn poll_control_commands(
       "project-remove" if argument != "" =>
         queue.push({ ..control_command(37), key: argument, })
       "project-rescan" => queue.push(control_command(38))
+      "suggest-watches" => queue.push(control_command(41))
+      "suggest-watch" if argument != "" =>
+        queue.push({
+          ..control_command(40),
+          key: argument.replace_all(old=",", new="\n"),
+        })
       "project-follow" if argument != "" =>
         queue.push({ ..control_command(39), key: argument, })
       "related-only" =>

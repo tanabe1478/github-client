@@ -384,6 +384,8 @@ async fn main {
   let mut auto_paused_until_ms = 0L
   let pending_jobs : Array[FetchJob] = []
   let mut running_job : FetchJob? = None
+  // Opens Watch suggestions once the base projects just added are read.
+  let mut suggest_pending = false
   let mut running_task : @async.Task[Unit]? = None
   // Each job gets a generation. A cancelled or timed-out job is abandoned
   // without waiting for it: some GitHub reads never return and ignore
@@ -875,6 +877,71 @@ async fn main {
 
   // An existing directory adds every GitHub repository found under it;
   // anything else is read as owner/name.
+  fn watch_candidates() -> Array[@domain.WatchCandidate] {
+    @domain.watch_candidates(
+      profiles,
+      model.repositories().map(repository => repository.key()),
+    )
+  }
+
+  // `automatic` is the dialog after adding base projects, which stays
+  // closed when there is nothing to suggest.
+  fn open_watch_suggestions(automatic : Bool) -> Unit {
+    let candidates = watch_candidates()
+    if candidates.is_empty() {
+      if !automatic {
+        notify(
+          "Every repository your base projects depend on is watched.",
+          None,
+        )
+      }
+      return
+    }
+    github_client_imgui_open_watch_suggestions(
+      candidates
+      .map(candidate => {
+        "\{candidate.repository}\t\{candidate.uses.map(safe_row_text).join("\u{1f}")}"
+      })
+      .join("\n"),
+    )
+    println("ui-action: watch-suggestions count=\{candidates.length()}")
+  }
+
+  // Watches repositories for their releases only, in one background fetch.
+  fn watch_for_releases(names : Array[String]) -> Unit {
+    let added : Array[@domain.RepositoryRef] = []
+    for name in names {
+      guard @domain.RepositoryRef::parse(name.trim().to_owned())
+        is Ok(repository) else {
+        continue
+      }
+      if @domain.repository_is_watched(model.repositories(), repository.key()) {
+        continue
+      }
+      watch_options.set(repository.key(), {
+        ..@domain.WatchOptions::default(),
+        pull_requests: false,
+        issues: false,
+        for_you: false,
+        releases: true,
+      })
+      model = @domain.update(model, @domain.Msg::RegisterRepository(repository))
+      added.push(repository)
+    }
+    guard !added.is_empty() else { return }
+    match save_watched() {
+      Ok(_) => ()
+      Err(error) => println("repository-store: save failed: \{error}")
+    }
+    remember_files()
+    let noun = if added.length() == 1 { "repository" } else { "repositories" }
+    notify("Watching \{added.length()} \{noun} for their releases.", None)
+    if !saved_tokens.is_empty() {
+      pending_jobs.push(External(added))
+    }
+    println("ui-action: watch-suggested added=\{added.length()}")
+  }
+
   fn add_base_projects(raw : String) -> Unit {
     let input = raw.trim().to_owned()
     if input == "" {
@@ -893,6 +960,7 @@ async fn main {
               None,
             )
           } else if save_base_repositories([..current, ..added]) {
+            suggest_pending = true
             let noun = if added.length() == 1 {
               "repository"
             } else {
@@ -914,6 +982,7 @@ async fn main {
           if current.contains(key) {
             notify("\{key} is already a base project.", None)
           } else if save_base_repositories([..current, key]) {
+            suggest_pending = true
             notify("Added \{key}.", None)
             println("ui-action: base-project.add \{key}")
           }
@@ -1367,6 +1436,15 @@ async fn main {
             Err(error) => println("store: settings reload failed: \{error}")
           }
         }
+      }
+      if suggest_pending &&
+        running_job is None &&
+        pending_jobs.is_empty() &&
+        settings.base_repositories.all(name => {
+          profiles.any(profile => profile.name == name)
+        }) {
+        suggest_pending = false
+        open_watch_suggestions(true)
       }
       if running_job is None && !pending_jobs.is_empty() {
         let job = pending_jobs.remove(0)
@@ -2126,6 +2204,16 @@ async fn main {
             println("ui-action: base-project.remove \{name}")
           }
         }
+        40 => {
+          let chosen = github_client_imgui_take_key()
+          let names = if chosen == "all" {
+            watch_candidates().map(candidate => candidate.repository)
+          } else {
+            chosen.split("\n").map(name => name.to_owned()).to_array()
+          }
+          watch_for_releases(names)
+        }
+        41 => open_watch_suggestions(false)
         39 => {
           // Use the name a renamed base project has now.
           let name = github_client_imgui_take_key()

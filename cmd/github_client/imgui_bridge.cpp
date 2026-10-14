@@ -618,6 +618,11 @@ static bool gc_related_only = true;
 static std::string gc_why_pending_url;
 static char gc_project_input[512] = "";
 static bool gc_project_dialog_request = false;
+// Watch suggestions: one line per repository, "owner/name\tuses" with uses
+// separated by U+001F, and which ones are checked.
+static std::string gc_suggest_data;
+static std::vector<bool> gc_suggest_checked;
+static bool gc_suggest_request = false;
 static bool gc_why_request = false;
 static std::string gc_why_title;
 static std::string gc_why_data;
@@ -1497,6 +1502,11 @@ static int gc_render_settings(const GcFrame& frame, float width) {
     const float add_w = gc_button_width("Add base projects", GC_ICON_NONE);
     ImGui::SetCursorScreenPos(ImVec2(pos.x + card_w - 20.0f - add_w, pos.y + 16.0f));
     if (gc_button("##base-project.open", "Add base projects", GC_BUTTON_PRIMARY)) gc_project_dialog_request = true;
+    if (!frame.projects.empty()) {
+      const float suggest_w = gc_button_width("Suggest watches", GC_ICON_NONE);
+      ImGui::SetCursorScreenPos(ImVec2(pos.x + card_w - 20.0f - add_w - 8.0f - suggest_w, pos.y + 16.0f));
+      if (gc_button("##base-project.suggest", "Suggest watches", GC_BUTTON_DEFAULT)) action = 41;
+    }
     if (frame.projects.empty()) {
       gc_text(draw, gc_font_regular, 13.0f, ImVec2(pos.x + 20.0f, pos.y + bp_head + 28.0f), GC_MUTED,
               "No base project yet. Add a repository, or a directory with repositories in it.");
@@ -2038,6 +2048,91 @@ static int gc_render_project_dialog() {
   return action;
 }
 
+// Watch what the base projects depend on: a checklist of repositories that
+// are not watched yet; Watch brings in their releases only.
+static int gc_render_suggest_dialog() {
+  int action = 0;
+  const char* id = "Watch what your base projects use##suggest.dialog";
+  const std::vector<std::string> lines = gc_split(gc_suggest_data, '\n');
+  if (gc_suggest_request) {
+    gc_suggest_request = false;
+    gc_suggest_checked.assign(lines.size(), false);
+    ImGui::OpenPopup(id);
+  }
+  if (gc_suggest_checked.size() != lines.size()) gc_suggest_checked.assign(lines.size(), false);
+  gc_dialog_begin_style();
+  gc_center_next_window(560.0f);
+  if (ImGui::BeginPopupModal(id, nullptr, GC_DIALOG_FLAGS)) {
+    gc_font(gc_font_bold, 16.0f);
+    ImGui::TextUnformatted("Watch what your base projects use");
+    gc_pop_font();
+    gc_font(gc_font_regular, 13.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, GC_MUTED);
+    ImGui::TextWrapped("These repositories are GitHub Actions, Terraform providers, and tools your base projects use. Watching one brings in its releases only, labeled for each project.");
+    ImGui::PopStyleColor();
+    ImGui::Dummy(ImVec2(1.0f, 4.0f));
+    int checked = 0;
+    for (bool on : gc_suggest_checked) checked += on ? 1 : 0;
+    const bool all = checked == static_cast<int>(lines.size());
+    if (gc_button("##suggest.all", all ? "Clear all" : "Select all", GC_BUTTON_DEFAULT)) {
+      gc_suggest_checked.assign(lines.size(), !all);
+    }
+    ImGui::Dummy(ImVec2(1.0f, 4.0f));
+    const float row_h = 46.0f;
+    const float list_h = ImMin(static_cast<float>(lines.size()) * row_h + 2.0f, 360.0f);
+    ImGui::BeginChild("##suggest.list", ImVec2(-1.0f, list_h), ImGuiChildFlags_Borders);
+    for (size_t k = 0; k < lines.size(); ++k) {
+      const std::vector<std::string> parts = gc_split(lines[k], '\t');
+      const std::string repository = parts.empty() ? std::string() : parts[0];
+      std::string uses;
+      if (parts.size() > 1) {
+        for (const std::string& use : gc_split(parts[1], '\x1f')) {
+          if (!uses.empty()) uses += ", ";
+          uses += use;
+        }
+      }
+      ImGui::PushID(static_cast<int>(k));
+      const ImVec2 at = ImGui::GetCursorScreenPos();
+      bool on = gc_suggest_checked[k];
+      ImGui::SetCursorScreenPos(ImVec2(at.x + 10.0f, at.y + 12.0f));
+      if (ImGui::Checkbox("##suggest.check", &on)) gc_suggest_checked[k] = on;
+      ImDrawList* draw = ImGui::GetWindowDrawList();
+      const float text_max = at.x + ImGui::GetContentRegionAvail().x - 8.0f;
+      gc_text_ellipsis(gc_font_bold, 13.0f, ImVec2(at.x + 42.0f, at.y + 6.0f), text_max, GC_FG, repository);
+      gc_text_ellipsis(gc_font_regular, 12.0f, ImVec2(at.x + 42.0f, at.y + 25.0f), text_max, GC_MUTED, uses);
+      // The row's own item keeps the list's size right.
+      ImGui::SetCursorScreenPos(at);
+      ImGui::Dummy(ImVec2(text_max + 8.0f - at.x, row_h));
+      if (k + 1 < lines.size()) draw->AddLine(ImVec2(at.x, at.y + row_h - 1.0f), ImVec2(text_max + 8.0f, at.y + row_h - 1.0f), GC_BORDER_MUTED);
+      ImGui::PopID();
+    }
+    ImGui::EndChild();
+    gc_pop_font();
+    ImGui::Dummy(ImVec2(1.0f, 6.0f));
+    const std::string watch_label = checked == 1 ? std::string("Watch 1 repository") : "Watch " + std::to_string(checked) + " repositories";
+    const float watch_w = gc_button_width(watch_label.c_str(), GC_ICON_NONE);
+    const float later_w = gc_button_width("Not now", GC_ICON_NONE);
+    const float row_y = ImGui::GetCursorPosY();
+    ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - 24.0f - watch_w - 8.0f - later_w, row_y));
+    if (gc_button("##suggest.later", "Not now", GC_BUTTON_DEFAULT)) ImGui::CloseCurrentPopup();
+    ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - 24.0f - watch_w, row_y));
+    if (gc_button("##suggest.watch", watch_label.c_str(), GC_BUTTON_PRIMARY, GC_ICON_NONE, checked == 0)) {
+      std::string selected;
+      for (size_t k = 0; k < lines.size(); ++k) {
+        if (!gc_suggest_checked[k]) continue;
+        const std::vector<std::string> parts = gc_split(lines[k], '\t');
+        if (parts.empty()) continue;
+        if (!selected.empty()) selected += "\n";
+        selected += parts[0];
+      }
+      gc_selected_key = selected; action = 40; ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+  gc_dialog_end_style();
+  return action;
+}
+
 // snackbar: seq message undo. Enters by rising 16 px over 250 ms, stays 5 s.
 static int gc_render_snackbar(const GcFrame& frame, ImVec2 panel_min, ImVec2 panel_max, double now) {
   int action = 0;
@@ -2199,6 +2294,8 @@ extern "C" int github_client_imgui_render(
   if (overlay) action = overlay;
   overlay = gc_render_project_dialog();
   if (overlay) action = overlay;
+  overlay = gc_render_suggest_dialog();
+  if (overlay) action = overlay;
   overlay = gc_render_confirm_remove();
   if (overlay) action = overlay;
   overlay = gc_render_alert(frame);
@@ -2258,6 +2355,7 @@ extern "C" int github_client_imgui_view_related_only(void) { return gc_related_o
 extern "C" void github_client_imgui_set_view_related_only(int value) { gc_related_only = value != 0; }
 extern "C" void github_client_imgui_set_view_project(const uint16_t* value) { gc_view_project = gc_utf8(value); }
 extern "C" void github_client_imgui_open_why(const uint16_t* url) { gc_why_pending_url = gc_utf8(url); }
+extern "C" void github_client_imgui_open_watch_suggestions(const uint16_t* text) { gc_suggest_data = gc_utf8(text); gc_suggest_request = true; }
 extern "C" int github_client_imgui_auto_refresh_enabled(void) { return gc_auto_refresh_enabled ? 1 : 0; }
 
 extern "C" void github_client_imgui_set_show_done(int value) { gc_show_done = value != 0; }
