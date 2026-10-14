@@ -3,6 +3,7 @@ import {
   "tanabe1478/github-client-credential-store" @credential_store,
   "tanabe1478/github-client-domain" @domain,
   "tanabe1478/github-client-github-api" @github_api,
+  "tanabe1478/github-client-project-reader" @project_reader,
 }
 
 supported_targets = "native"

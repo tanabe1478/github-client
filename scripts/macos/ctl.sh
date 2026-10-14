@@ -25,6 +25,16 @@ commands:
                         pull-requests,issues,releases,for-you
   release-notify <owner/repo> all|major-minor|major|off
                         which releases of a watched repository notify
+  project-add <owner/name|url|directory>
+                        add base projects; a directory adds every
+                        GitHub repository found in it
+  project-remove <owner/name>
+                        remove a base project
+  project-rescan        read every base project again
+  related-only 0|1      Releases "Related only" filter
+  project <owner/name|all>
+                        Releases base project filter
+  why <release url>     open "Why it is related" for a release row
   refresh               refresh watched activity
   refresh-for-you       refresh personal activity only
   refresh-all           refresh watched and personal activity
@@ -54,7 +64,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 case "$1" in
-  open|done|save|unsub|unsubscribe|nav|watch|unwatch|kind|repo|reason|expand|menu)
+  open|done|save|unsub|unsubscribe|nav|watch|unwatch|kind|repo|reason|expand|menu|project-add|project-remove|related-only|project|why)
     if [[ $# -lt 2 ]]; then
       echo "$1 requires an argument" >&2
       usage
@@ -66,7 +76,7 @@ case "$1" in
       usage
     fi
     ;;
-  refresh|refresh-for-you|refresh-all|auto-refresh|undo|cancel|token-dialog|search|quit)
+  refresh|refresh-for-you|refresh-all|auto-refresh|undo|cancel|token-dialog|search|quit|project-rescan)
     ;;
   show-done)
     ;;

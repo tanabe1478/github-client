@@ -115,6 +115,28 @@ fn poll_control_commands(
       "refresh-for-you" => queue.push(control_command(21))
       "refresh-all" => queue.push(control_command(32))
       "auto-refresh" => queue.push(control_command(35))
+      "project-add" if rest != "" =>
+        queue.push({ ..control_command(36), key: rest, })
+      "project-remove" if argument != "" =>
+        queue.push({ ..control_command(37), key: argument, })
+      "project-rescan" => queue.push(control_command(38))
+      "related-only" =>
+        github_client_imgui_set_view_related_only(
+          if argument == "0" {
+            0
+          } else {
+            1
+          },
+        )
+      "why" if argument != "" => github_client_imgui_open_why(argument)
+      "project" =>
+        github_client_imgui_set_view_project(
+          if argument == "all" {
+            ""
+          } else {
+            argument
+          },
+        )
       "show-done" =>
         github_client_imgui_set_show_done(if argument == "0" { 0 } else { 1 })
       "kind" =>

@@ -6,6 +6,7 @@ import {
   "tanabe1478/github-client-credential-store@0.1.0",
   "tanabe1478/github-client-domain@0.1.0",
   "tanabe1478/github-client-github-api@0.1.0",
+  "tanabe1478/github-client-project-reader@0.1.0",
   "moonbitlang/async@0.22.1",
 }
 

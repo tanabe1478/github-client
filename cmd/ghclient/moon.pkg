@@ -6,6 +6,7 @@ import {
   "tanabe1478/github-client-credential-store" @credential_store,
   "tanabe1478/github-client-domain" @domain,
   "tanabe1478/github-client-github-api" @github_api,
+  "tanabe1478/github-client-project-reader" @project_reader,
   "tanabe1478/github-client-repository-store" @repository_store,
   "tanabe1478/github-client-review-request-store" @review_request_store,
   "tanabe1478/github-client-read-state-store" @read_state_store,

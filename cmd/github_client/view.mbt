@@ -25,6 +25,7 @@ fn serialize_rows(
   show_repository : Bool,
   fresh_since : Map[String, Double],
   now : Double,
+  relations? : Map[String, Array[@domain.Relation]] = Map([]),
 ) -> String {
   rows
   .map(row => {
@@ -70,6 +71,7 @@ fn serialize_rows(
           flag(nested),
           flag(show_repository),
           fresh_age,
+          relations_text(relations.get(item.url).unwrap_or([])),
         ].join("\t")
       }
       Bundle(key~, repository~, author~, items~, expanded~, unread~) => {
@@ -87,6 +89,77 @@ fn serialize_rows(
           unread.to_string(),
         ].join("\t")
       }
+    }
+  })
+  .join("\n")
+}
+
+///|
+/// A release's relations for the bridge: one entry per relation, joined by
+/// U+001E; each entry is kind, project, label, and evidence lines, joined by
+/// U+001F.
+fn relations_text(relations : Array[@domain.Relation]) -> String {
+  relations
+  .map(relation => {
+    [
+      relation.kind.name(),
+      relation.project,
+      relation.label,
+      ..relation.evidence,
+    ]
+    .map(field => {
+      safe_row_text(field)
+      .replace_all(old="\u{1e}", new=" ")
+      .replace_all(old="\u{1f}", new=" ")
+    })
+    .join("\u{1f}")
+  })
+  .join("\u{1e}")
+}
+
+///|
+/// One line per base project: name, problem, and what was found, the last
+/// joined by U+001F. Projects not read yet show as "Reading…".
+fn projects_text(
+  profiles : Array[@domain.ProjectProfile],
+  repositories : Array[String],
+) -> String {
+  repositories
+  .map(name => {
+    match profiles.filter(profile => profile.name == name) {
+      [profile, ..] => {
+        let found = @domain.headline_tools(profile)
+        if profile.dependency_count > 0 {
+          found.push("\{profile.dependency_count} dependencies")
+        }
+        // Files that hold settings; the build files show as the versions
+        // and dependencies above.
+        for file in profile.files {
+          if file == ".npmrc" ||
+            file == "pnpm-workspace.yaml" ||
+            file == "gradle.properties" {
+            found.push(file)
+          }
+        }
+        let spring = profile.files.filter(file => {
+          file.contains("src/main/resources/application")
+        })
+        if !spring.is_empty() {
+          let noun = if spring.length() == 1 { "file" } else { "files" }
+          found.push("Spring settings in \{spring.length()} \{noun}")
+        }
+        // "none": readable, but nothing this version reads, such as a Java
+        // project.
+        let state = if profile.problem == "" && profile.files.is_empty() {
+          "none"
+        } else {
+          ""
+        }
+        [name, safe_row_text(profile.problem), found.join("\u{1f}"), state].join(
+          "\t",
+        )
+      }
+      [] => [name, "", "", "reading"].join("\t")
     }
   })
   .join("\n")

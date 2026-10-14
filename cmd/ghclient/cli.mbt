@@ -14,6 +14,10 @@ priv struct Invocation {
   /// empty keeps them.
   kinds : String
   release_notify : String
+  /// `releases` only: keep releases related to a base project, optionally
+  /// one project.
+  related : Bool
+  project : String
 }
 
 ///|
@@ -27,6 +31,7 @@ let usage : String =
   #|             in watched repositories   --reason REASON  --all
   #|  releases   releases of watched repositories that choose them
   #|             --repo OWNER/NAME  --query TEXT  --all
+  #|             --related  --project OWNER/NAME   (base projects)
   #|  saved      items saved for later
   #|
   #|Triage, stored locally (a running app picks the change up):
@@ -42,6 +47,11 @@ let usage : String =
   #|             --release-notify all|major-minor|major|off
   #|  unwatch <owner/name>...  stop watching
   #|  accounts                 saved tokens (scope and login, never the token)
+  #|  projects                 base projects and what each uses
+  #|  project-add <owner/name|directory>...
+  #|                           add base projects; a directory adds every
+  #|                           GitHub repository found under it
+  #|  project-remove <owner/name>...
   #|
   #|Options:
   #|  --json   print JSON on stdout
@@ -57,13 +67,15 @@ let usage : String =
 ///|
 let commands : Array[String] = [
   "inbox", "for-you", "releases", "saved", "done", "undone", "save", "unsave", "mute",
-  "unmute", "repos", "watch", "unwatch", "accounts", "help",
+  "unmute", "repos", "watch", "unwatch", "accounts", "projects", "project-add", "project-remove",
+  "help",
 ]
 
 ///|
 /// Commands that act on one or more arguments.
 let commands_with_arguments : Array[String] = [
-  "done", "undone", "save", "unsave", "mute", "unmute", "watch", "unwatch",
+  "done", "undone", "save", "unsave", "mute", "unmute", "watch", "unwatch", "project-add",
+  "project-remove",
 ]
 
 ///|
@@ -78,6 +90,8 @@ fn parse_invocation(args : Array[String]) -> Result[Invocation, String] {
   let mut reason = ""
   let mut kinds = ""
   let mut release_notify = ""
+  let mut related = false
+  let mut project = ""
   let mut index = 0
   while index < args.length() {
     let arg = args[index]
@@ -120,6 +134,12 @@ fn parse_invocation(args : Array[String]) -> Result[Invocation, String] {
             | "Subscribed" as chosen
           ) => reason = chosen
           Ok(other) => return Err("unknown reason: \{other}")
+          Err(error) => return Err(error)
+        }
+      "--related" => related = true
+      "--project" =>
+        match value() {
+          Ok(chosen) => project = chosen
           Err(error) => return Err(error)
         }
       "--kinds" =>
@@ -167,6 +187,9 @@ fn parse_invocation(args : Array[String]) -> Result[Invocation, String] {
   if (kinds != "" || release_notify != "") && command != "watch" {
     return Err("--kinds and --release-notify apply to watch only")
   }
+  if (related || project != "") && command != "releases" {
+    return Err("--related and --project apply to releases only")
+  }
   Ok({
     command,
     arguments,
@@ -179,6 +202,8 @@ fn parse_invocation(args : Array[String]) -> Result[Invocation, String] {
     reason,
     kinds,
     release_notify,
+    related,
+    project,
   })
 }
 
@@ -196,6 +221,8 @@ fn help_invocation() -> Invocation {
     reason: "",
     kinds: "",
     release_notify: "",
+    related: false,
+    project: "",
   }
 }
 

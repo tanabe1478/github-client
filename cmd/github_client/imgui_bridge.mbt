@@ -3,7 +3,7 @@
 extern "C" fn github_client_imgui_init(window : @glfw.GLFWwindow) -> Int = "github_client_imgui_init"
 
 ///|
-#borrow(window, nav, header, rows, repositories, suggestions, credentials, banners, loading, snackbar, alert, token, page_error)
+#borrow(window, nav, header, rows, repositories, suggestions, credentials, projects, banners, loading, snackbar, alert, token, page_error)
 extern "C" fn github_client_imgui_render(
   window : @glfw.GLFWwindow,
   page : Int,
@@ -17,6 +17,7 @@ extern "C" fn github_client_imgui_render(
   repositories : String,
   suggestions : String,
   credentials : String,
+  projects : String,
   banners : String,
   loading : String,
   snackbar : String,
@@ -150,4 +151,31 @@ fn imgui_view_filter() -> @domain.ActivityFilter {
     reason: github_client_imgui_view_reason(),
     show_done: github_client_imgui_view_show_done() != 0,
   }
+}
+
+///|
+extern "C" fn github_client_imgui_view_project() -> String = "github_client_imgui_view_project"
+
+///|
+extern "C" fn github_client_imgui_view_related_only_raw() -> Int = "github_client_imgui_view_related_only"
+
+///|
+extern "C" fn github_client_imgui_set_view_related_only(value : Int) -> Unit = "github_client_imgui_set_view_related_only"
+
+///|
+#borrow(value)
+extern "C" fn github_client_imgui_set_view_project(value : String) -> Unit = "github_client_imgui_set_view_project"
+
+///|
+#borrow(url)
+extern "C" fn github_client_imgui_open_why(url : String) -> Unit = "github_client_imgui_open_why"
+
+///|
+fn imgui_view_project() -> String {
+  github_client_imgui_view_project()
+}
+
+///|
+fn imgui_view_related_only() -> Bool {
+  github_client_imgui_view_related_only_raw() != 0
 }

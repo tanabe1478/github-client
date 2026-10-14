@@ -9,6 +9,9 @@ pub(all) struct Settings {
   /// How many days back review comments are read for mentions, and how
   /// recently a merged or closed item must have been updated to be listed.
   mention_days : Int
+  /// Base projects, as owner/name. Releases are matched against what they
+  /// use (ADR 0007).
+  base_repositories : Array[String]
 } derive(Eq, Debug)
 
 ///|
@@ -17,6 +20,7 @@ pub fn default_settings() -> Settings {
     include_merged_mentions: false,
     include_closed_mentions: false,
     mention_days: 30,
+    base_repositories: [],
   }
 }
 
@@ -48,6 +52,11 @@ pub fn encode(settings : Settings) -> String {
     "",
     "# How many days back review comments are read for mentions, and how recently a merged or closed item must have been updated (\{MIN_MENTION_DAYS} to \{MAX_MENTION_DAYS}).",
     "mentions.days = \{settings.mention_days}",
+    "",
+    "# Base projects: one GitHub repository (owner/name) per line. Releases are matched against what they use.",
+    ..settings.base_repositories.map(repository => {
+      "base.repository = \{repository}"
+    }),
   ].join("\n") +
   "\n"
 }
@@ -107,6 +116,18 @@ pub fn decode(source : String) -> Result[Settings, String] {
           Ok(days) => settings = { ..settings, mention_days: days, }
           Err(error) => return Err(error)
         }
+      "base.repository" => {
+        let parts = value.split("/").to_array()
+        guard parts.length() == 2 && parts[0] != "" && parts[1] != "" else {
+          return Err("base.repository at line \{number} must be owner/name")
+        }
+        if !settings.base_repositories.contains(value) {
+          settings = {
+            ..settings,
+            base_repositories: [..settings.base_repositories, value],
+          }
+        }
+      }
       _ => return Err("unknown setting \"\{key}\" at line \{number}")
     }
   }

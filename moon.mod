@@ -10,6 +10,7 @@ import {
   "tanabe1478/github-client-github-api@0.1.0",
   "tanabe1478/github-client-repository-store@0.1.0",
   "tanabe1478/github-client-review-request-store@0.1.0",
+  "tanabe1478/github-client-project-reader@0.1.0",
   "tanabe1478/github-client-read-state-store@0.1.0",
   "tanabe1478/github-client-triage-store@0.1.0",
   "tanabe1478/github-client-settings-store@0.1.0",

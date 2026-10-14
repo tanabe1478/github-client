@@ -14,6 +14,8 @@ priv enum FetchJob {
   External(Array[@domain.RepositoryRef])
   /// The mention settings changed: refetch only the mentions they decide.
   MentionSettings
+  /// Base projects were added, removed, or rescanned (ADR 0007).
+  BaseProjects
 }
 
 ///|
@@ -29,6 +31,7 @@ fn FetchJob::title(self : FetchJob) -> String {
     Auto => "Auto refreshing"
     External(_) => "Updating watched repositories"
     MentionSettings => "Updating mentions"
+    BaseProjects => "Reading base projects"
   }
 }
 
@@ -42,6 +45,7 @@ fn FetchJob::is_modal(self : FetchJob) -> Bool {
   | External(_)
   | AddedRepository(_)
   | MentionSettings
+  | BaseProjects
   | VerifyToken(_, _)))
 }
 
@@ -54,7 +58,12 @@ fn FetchJob::is_cancellable(self : FetchJob) -> Bool {
 ///|
 fn FetchJob::success_message(self : FetchJob) -> String? {
   match self {
-    Startup | VerifyToken(_, _) | Auto | External(_) | MentionSettings => None
+    Startup
+    | VerifyToken(_, _)
+    | Auto
+    | External(_)
+    | MentionSettings
+    | BaseProjects => None
     Watched => Some("Watched activity refreshed.")
     Personal => Some("For you refreshed.")
     Everything => Some("Activity refreshed.")
@@ -235,6 +244,13 @@ async fn main {
   let pull_requests : Array[@github_api.ActivitySummary] = []
   let issues : Array[@github_api.ActivitySummary] = []
   let releases : Array[@github_api.ActivitySummary] = []
+  // Base projects as read from GitHub, and the relations of each release to
+  // them, rebuilt when either changes (ADR 0007).
+  let mut profiles : Array[@domain.ProjectProfile] = []
+  let mut profiles_revision = 0
+  let mut releases_revision = 0
+  let mut indexed_revisions = (-1, -1)
+  let mut relation_index : Map[String, Array[@domain.Relation]] = Map([])
   let suggested_repositories : Array[@github_api.RepositorySummary] = []
   let review_requests : Array[@github_api.ActivitySummary] = []
   let assignments : Array[@github_api.ActivitySummary] = []
@@ -515,6 +531,7 @@ async fn main {
         @domain.repository_is_watched(watched, activity.repository())
       }),
     )
+    releases_revision += 1
     has_loaded = true
     last_synced = Some(imgui_now())
   }
@@ -729,6 +746,7 @@ async fn main {
     pull_requests.append(next_pull_requests.filter(kept))
     issues.append(next_issues.filter(kept))
     releases.append(next_releases.filter(kept))
+    releases_revision += 1
     @activity_sync.append_unique_activities(mention_extras, extras.filter(kept))
     combine_mentions()
   }
@@ -807,6 +825,104 @@ async fn main {
     )
   }
 
+  // Base projects are read from GitHub after the token assignment is known,
+  // so a startup or token change reads them at the end of its job.
+  async fn load_profiles(generation : Int) -> Unit {
+    let repositories = settings.base_repositories
+    if repositories.is_empty() {
+      if !profiles.is_empty() {
+        profiles = []
+        profiles_revision += 1
+      }
+      return
+    }
+    loading_detail = "Base projects"
+    let next = @activity_sync.fetch_project_profiles(
+      saved_tokens, repo_scopes, owner_scopes, repositories,
+    )
+    if generation != active_generation {
+      return
+    }
+    profiles = next
+    profiles_revision += 1
+  }
+
+  fn queue_base_projects() -> Unit {
+    if !saved_tokens.is_empty() && !pending_jobs.any(job => job is BaseProjects) {
+      pending_jobs.push(BaseProjects)
+    }
+  }
+
+  // Saves the base projects and reads them again.
+  fn save_base_repositories(next : Array[String]) -> Bool {
+    let updated = { ..settings, base_repositories: next, }
+    match @settings_store.save_default(updated) {
+      Ok(_) => {
+        settings = updated
+        remember_files()
+        profiles = profiles.filter(profile => next.contains(profile.name))
+        profiles_revision += 1
+        queue_base_projects()
+        true
+      }
+      Err(error) => {
+        notify("Couldn't save settings.", None)
+        println("settings-store: save failed: \{error}")
+        false
+      }
+    }
+  }
+
+  // An existing directory adds every GitHub repository found under it;
+  // anything else is read as owner/name.
+  fn add_base_projects(raw : String) -> Unit {
+    let input = raw.trim().to_owned()
+    if input == "" {
+      return
+    }
+    let current = settings.base_repositories
+    if @project_reader.is_directory(@project_reader.expand_home(input)) {
+      match @project_reader.discover_repositories(input) {
+        Ok(found) => {
+          let added = found.filter(name => !current.contains(name))
+          if found.is_empty() {
+            notify("No GitHub repositories were found in \{input}.", None)
+          } else if added.is_empty() {
+            notify(
+              "All \{found.length()} repositories in \{input} are already base projects.",
+              None,
+            )
+          } else if save_base_repositories([..current, ..added]) {
+            let noun = if added.length() == 1 {
+              "repository"
+            } else {
+              "repositories"
+            }
+            notify("Added \{added.length()} \{noun} from \{input}.", None)
+          }
+          println(
+            "ui-action: base-project.add-directory found=\{found.length()} added=\{added.length()}",
+          )
+        }
+        Err(message) => notify(message, None)
+      }
+    } else {
+      match
+        @domain.RepositoryRef::parse(@project_reader.repository_input(input)) {
+        Ok(reference) => {
+          let key = reference.key()
+          if current.contains(key) {
+            notify("\{key} is already a base project.", None)
+          } else if save_base_repositories([..current, key]) {
+            notify("Added \{key}.", None)
+            println("ui-action: base-project.add \{key}")
+          }
+        }
+        Err(_) => notify("Enter owner/name or a directory that exists.", None)
+      }
+    }
+  }
+
   // A queued job reads the settings when it runs, so one is enough.
   fn queue_mention_settings() -> Unit {
     if !pending_jobs.any(job => job is MentionSettings) {
@@ -847,7 +963,11 @@ async fn main {
     loading_done = 0
     loading_total = 0
     match job {
-      Startup | Credentials(_) => reload_all(generation)
+      Startup | Credentials(_) => {
+        reload_all(generation)
+        load_profiles(generation)
+      }
+      BaseProjects => load_profiles(generation)
       VerifyToken(scope, token) => {
         loading_detail = "Checking the token with GitHub"
         let verified = @github_api.get_authenticated_user(token)
@@ -1180,6 +1300,7 @@ async fn main {
                     model,
                     @domain.Msg::RemoveRepository(repository.key()),
                   )
+                  releases_revision += 1
                   for list in [pull_requests, issues, releases] {
                     @activity_sync.replace_activities(
                       list,
@@ -1222,9 +1343,23 @@ async fn main {
             Ok(next) => {
               println("store: settings changed outside the app")
               if next != settings {
+                let mentions_changed = {
+                    ..next,
+                    base_repositories: settings.base_repositories,
+                  } !=
+                  settings
+                let projects_changed = next.base_repositories !=
+                  settings.base_repositories
                 settings = next
-                if !saved_tokens.is_empty() {
+                if mentions_changed && !saved_tokens.is_empty() {
                   queue_mention_settings()
+                }
+                if projects_changed {
+                  profiles = profiles.filter(profile => {
+                    next.base_repositories.contains(profile.name)
+                  })
+                  profiles_revision += 1
+                  queue_base_projects()
                 }
               }
             }
@@ -1379,6 +1514,59 @@ async fn main {
         ],
         muted_urls,
       )
+      // Relations of releases to base projects, rebuilt only when either
+      // changed.
+      if indexed_revisions != (releases_revision, profiles_revision) {
+        indexed_revisions = (releases_revision, profiles_revision)
+        relation_index = Map([])
+        if !profiles.is_empty() {
+          for release in releases {
+            let found = @domain.release_relations(
+              release.repository(),
+              release.tag(),
+              release.notes(),
+              profiles,
+            )
+            if !found.is_empty() {
+              relation_index.set(release.html_url(), found)
+            }
+          }
+        }
+      }
+      let view_project = imgui_view_project()
+      // Related only needs a base project to relate to.
+      let related_only = imgui_view_related_only() && !profiles.is_empty()
+      let project_relations = (url : String) => {
+        relation_index
+        .get(url)
+        .unwrap_or([])
+        .filter(relation => {
+          view_project == "" || relation.project == view_project
+        })
+      }
+      let release_kept = (item : @domain.ActivityItem) => {
+        let found = project_relations(item.url)
+        (view_project == "" || !found.is_empty()) &&
+        (!related_only || found.any(relation => relation.counts()))
+      }
+      let shown_releases = release_items.filter(release_kept)
+      let hidden_releases = release_items
+        .filter(item => {
+          !release_kept(item) &&
+          (
+            filter.show_done ||
+            !@domain.is_read_in(read_lookup, item.url, item.updated_at)
+          )
+        })
+        .length()
+      let related_count = release_items
+        .filter(item => {
+          relation_index
+          .get(item.url)
+          .unwrap_or([])
+          .any(relation => relation.counts())
+        })
+        .length()
       let for_you_items = @activity_sync.personal_items(
         review_requests,
         assignments,
@@ -1421,7 +1609,7 @@ async fn main {
         Releases =>
           (
             @domain.build_activity_rows(
-              release_items,
+              shown_releases,
               read_lookup,
               saved_urls,
               {
@@ -1487,7 +1675,12 @@ async fn main {
             })
             .length()
           let noun = if count == 1 { "repository" } else { "repositories" }
-          "\{releases_unread} unread of \{release_items.length()} · releases from \{count} watched \{noun}"
+          let related = if profiles.is_empty() {
+            ""
+          } else {
+            " · \{related_count} related to your base projects"
+          }
+          "\{releases_unread} unread of \{release_items.length()}\{related} · releases from \{count} watched \{noun}"
         }
         Repositories =>
           "Choose what each watched repository brings into Inbox, For you, and Releases."
@@ -1512,6 +1705,39 @@ async fn main {
               dismissed_banners,
             ),
           )
+          if page is Releases {
+            if profiles.is_empty() &&
+              !release_items.is_empty() &&
+              !dismissed_banners.contains("base-projects") {
+              problems.push({
+                kind: "info",
+                key: "base-projects",
+                title: "Add a base project to see which releases affect your projects.",
+                body: "",
+                action: "Open Settings",
+              })
+            }
+            if related_only &&
+              hidden_releases > 0 &&
+              !dismissed_banners.contains("related-only") {
+              let noun = if hidden_releases == 1 {
+                "release is"
+              } else {
+                "releases are"
+              }
+              problems.push({
+                kind: "info",
+                key: "related-only",
+                title: if view_project == "" {
+                  "\{hidden_releases} \{noun} hidden because no base project uses them at a version they change."
+                } else {
+                  "\{hidden_releases} \{noun} hidden because \{view_project} doesn't use them at a version they change."
+                },
+                body: "",
+                action: "Show all",
+              })
+            }
+          }
           if page is ForYou {
             problems.append(
               hidden_review_banners(
@@ -1563,7 +1789,13 @@ async fn main {
         flags,
         "\{inbox_unread}\t\{for_you_unread}\t\{watched.length()}\t\{authenticated_login}\t\{data_directory}\t\{releases_unread}",
         "\{safe_row_text(header)}\t\{synced_label(last_synced, now)}",
-        serialize_rows(rows, show_repository, fresh_since, now),
+        serialize_rows(
+          rows,
+          show_repository,
+          fresh_since,
+          now,
+          relations=if page is Releases { relation_index } else { Map([]) },
+        ),
         repositories_text(watched, watch_options),
         suggestions_text(
           suggested_repositories,
@@ -1571,6 +1803,7 @@ async fn main {
           [..review_requests, ..kept_review_requests],
         ),
         credentials_text(credential_problems),
+        projects_text(profiles, settings.base_repositories),
         banners_text(banners),
         loading,
         "\{snack_seq}\t\{safe_row_text(snack_message)}\t\{flag(undo_op is Some(_))}",
@@ -1661,6 +1894,7 @@ async fn main {
           match @domain.RepositoryRef::parse(key) {
             Ok(repository) => {
               model = @domain.update(model, @domain.Msg::RemoveRepository(key))
+              releases_revision += 1
               for list in [pull_requests, issues, releases] {
                 @activity_sync.replace_activities(
                   list,
@@ -1823,6 +2057,13 @@ async fn main {
             token_open_seq += 1
           } else if key.has_prefix("watch:") {
             watch_repository(key[6:].to_owned())
+          } else if key == "base-projects" {
+            model = @domain.update(
+              model,
+              @domain.Msg::Navigate(@domain.Page::Settings),
+            )
+          } else if key == "related-only" {
+            github_client_imgui_set_view_related_only(0)
           }
           println("ui-action: banner.action \{key}")
         }
@@ -1835,6 +2076,7 @@ async fn main {
         33 => {
           let packed = github_client_imgui_take_settings()
           let next : @settings_store.Settings = {
+            ..settings,
             include_merged_mentions: (packed & 1) != 0,
             include_closed_mentions: (packed & 2) != 0,
             mention_days: packed >> 8,
@@ -1861,6 +2103,22 @@ async fn main {
         15 => model = @domain.update(model, @domain.Msg::Navigate(ForYou))
         16 => model = @domain.update(model, @domain.Msg::Navigate(Saved))
         17 => model = @domain.update(model, @domain.Msg::Navigate(Releases))
+        // Base projects: add owner/name or a directory, remove, rescan.
+        36 => add_base_projects(github_client_imgui_take_key())
+        37 => {
+          let name = github_client_imgui_take_key()
+          if settings.base_repositories.contains(name) &&
+            save_base_repositories(
+              settings.base_repositories.filter(repository => repository != name),
+            ) {
+            notify("Removed \{name} from base projects.", None)
+            println("ui-action: base-project.remove \{name}")
+          }
+        }
+        38 => {
+          queue_base_projects()
+          println("ui-action: base-project.rescan")
+        }
         // The control file's auto-refresh: the same job the timer starts,
         // which posts notifications.
         35 =>

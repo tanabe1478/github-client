@@ -46,6 +46,7 @@ fn personal_activity_from_wire(
     updated_at: item.updated_at,
     tag: "",
     summary: "",
+    notes: "",
     prerelease: false,
     kind: if item.pull_request is Some(_) {
       PullRequest

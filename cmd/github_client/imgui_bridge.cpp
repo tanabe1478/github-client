@@ -547,6 +547,15 @@ static void gc_reason_colors(const std::string& reason, bool muted, ImU32* fg, I
   *fg = gc_alpha(*fg, a); *bg = gc_alpha(*bg, a); *border = gc_alpha(*border, a);
 }
 
+// Relation labels (ADR 0007): major update attention, newer accent, in use
+// muted, a setting outlined in accent.
+static void gc_relation_colors(const std::string& kind, ImU32* fg, ImU32* bg, ImU32* border) {
+  if (kind == "major") { *fg = GC_ATTENTION; *bg = GC_ATTENTION_SUBTLE; *border = GC_ATTENTION_BORDER; }
+  else if (kind == "newer") { *fg = GC_ACCENT_EMPHASIS; *bg = GC_ACCENT_SUBTLE; *border = GC_ACCENT_BORDER; }
+  else if (kind == "setting") { *fg = GC_ACCENT_EMPHASIS; *bg = GC_WHITE; *border = GC_ACCENT_BORDER; }
+  else { *fg = GC_MUTED; *bg = GC_CANVAS; *border = GC_BORDER; }
+}
+
 static float gc_ease_in_out(float x) {
   return x < 0.5f ? 4.0f * x * x * x : 1.0f - std::pow(-2.0f * x + 2.0f, 3.0f) / 2.0f;
 }
@@ -601,6 +610,18 @@ static char gc_query_input[256] = "";
 // Releases keeps its own repository and text filters, apart from Inbox.
 static std::string gc_release_repository;
 static char gc_release_query[256] = "";
+// Base projects (ADR 0007): the Releases filters, the add dialog, and the
+// "why it is related" popup.
+static std::string gc_view_project;
+static bool gc_related_only = true;
+// A release whose "why" popover the control file asked to open.
+static std::string gc_why_pending_url;
+static char gc_project_input[512] = "";
+static bool gc_project_dialog_request = false;
+static bool gc_why_request = false;
+static std::string gc_why_title;
+static std::string gc_why_data;
+static ImVec2 gc_why_anchor;
 static std::string gc_view_reason;
 static bool gc_show_done = false;
 static bool gc_auto_refresh_enabled = true;
@@ -663,6 +684,7 @@ struct GcFrame {
   std::vector<std::vector<std::string>> repositories;
   std::vector<std::vector<std::string>> suggestions;
   std::vector<std::vector<std::string>> credentials;
+  std::vector<std::vector<std::string>> projects;
   std::vector<std::vector<std::string>> banners;
   std::vector<std::string> loading;
   std::vector<std::string> snackbar;
@@ -805,7 +827,9 @@ static int gc_render_item(const std::vector<std::string>& r, float width) {
   const bool nested = gc_field(r, 13) == "1";
   const bool show_repository = gc_field(r, 14) == "1";
   const float fresh_age = static_cast<float>(std::atof(gc_field(r, 15).c_str()));
-  const float h = 60.0f;
+  const std::string relations_text = gc_field(r, 16);
+  const bool has_relations = !relations_text.empty();
+  const float h = has_relations ? 84.0f : 60.0f;
   ImGui::PushID(url.c_str());
   const ImVec2 pos = ImGui::GetCursorScreenPos();
   ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -833,7 +857,8 @@ static int gc_render_item(const std::vector<std::string>& r, float width) {
   const char* done_label = read ? "Move to inbox" : "Done";
   const GcIcon done_icon = read ? GC_ICON_INBOX : GC_ICON_CHECK;
   const float done_w = gc_button_width(done_label, done_icon);
-  const float actions_w = nested ? open_w + 6.0f + done_w : open_w + 6.0f + done_w + 6.0f + 32.0f + 2.0f + 32.0f;
+  const float actions_w = (nested ? open_w + 6.0f + done_w : open_w + 6.0f + done_w + 6.0f + 32.0f + 2.0f + 32.0f) +
+                          (has_relations && !nested ? 34.0f : 0.0f);
   const float actions_x = pos.x + width - 20.0f - actions_w;
   const float text_max = actions_x - 16.0f;
   gc_text_ellipsis(read ? gc_font_regular : gc_font_bold, GC_BODY, ImVec2(x, pos.y + 10.0f), text_max, read ? GC_MUTED : GC_FG, title);
@@ -864,6 +889,34 @@ static int gc_render_item(const std::vector<std::string>& r, float width) {
   if (draft) mx += gc_pill(draw, ImVec2(mx, my - 3.0f), release ? "Pre-release" : "Draft", GC_MUTED, GC_WHITE, GC_BORDER) + 6.0f;
   if (saved) mx += gc_pill(draw, ImVec2(mx, my - 3.0f), "Saved", GC_ACCENT, GC_ACCENT_SUBTLE, GC_ACCENT_BORDER) + 6.0f;
   ImGui::PopClipRect();
+  // Relations to base projects: one label per project and rule.
+  if (has_relations) {
+    const float ry = pos.y + 57.0f;
+    ImGui::PushClipRect(ImVec2(x, ry - 2.0f), ImVec2(text_max, ry + 22.0f), true);
+    float rx = x;
+    const std::vector<std::string> entries = gc_split(relations_text, '\x1e');
+    for (size_t k = 0; k < entries.size(); ++k) {
+      const std::vector<std::string> parts = gc_split(entries[k], '\x1f');
+      if (parts.size() < 3) continue;
+      // The pill names the repository without its owner; the "why" popover
+      // shows owner/name.
+      const size_t slash = parts[1].find('/');
+      const std::string project = slash == std::string::npos ? parts[1] : parts[1].substr(slash + 1);
+      const std::string text = project + " \xC2\xB7 " + parts[2];
+      // Whole pills only; what does not fit becomes "+N".
+      const std::string more = "+" + std::to_string(entries.size() - k - 1);
+      const float more_w = k + 1 < entries.size() ? gc_text_size(gc_font_regular, 12.0f, more).x + 22.0f : 0.0f;
+      const float pill_w = gc_text_size(gc_font_regular, 12.0f, text).x + 16.0f;
+      if (rx + pill_w + more_w > text_max && k > 0) {
+        gc_pill(draw, ImVec2(rx, ry), "+" + std::to_string(entries.size() - k), GC_MUTED, GC_WHITE, GC_BORDER);
+        break;
+      }
+      ImU32 fg, bg, border;
+      gc_relation_colors(parts[0], &fg, &bg, &border);
+      rx += gc_pill(draw, ImVec2(rx, ry), text, fg, bg, border) + 6.0f;
+    }
+    ImGui::PopClipRect();
+  }
   const float by = pos.y + (h - 32.0f) * 0.5f;
   ImGui::SetCursorScreenPos(ImVec2(actions_x, by));
   if (gc_button("##activity.open", "Open", GC_BUTTON_DEFAULT)) { gc_selected_url = url; action = 4; }
@@ -874,10 +927,22 @@ static int gc_render_item(const std::vector<std::string>& r, float width) {
     ImGui::SetCursorScreenPos(ImVec2(sx, by));
     if (gc_icon_button("##activity.save", saved ? GC_ICON_BOOKMARK_FILLED : GC_ICON_BOOKMARK, saved ? GC_ACCENT : GC_MUTED)) { gc_selected_url = url; action = 22; }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip(saved ? "Remove from Saved" : "Save for later");
-    ImGui::SetCursorScreenPos(ImVec2(sx + 34.0f, by));
+    float mx_button = sx + 34.0f;
+    if (has_relations) {
+      ImGui::SetCursorScreenPos(ImVec2(mx_button, by));
+      const bool why_pending = !gc_why_pending_url.empty() && gc_why_pending_url == url;
+      if (why_pending) gc_why_pending_url.clear();
+      if (gc_icon_button("##activity.why", GC_ICON_INFO, GC_MUTED) || why_pending) {
+        gc_why_title = number; gc_why_data = relations_text;
+        gc_why_anchor = ImVec2(mx_button + 32.0f, by + 36.0f); gc_why_request = true;
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("Why it is related");
+      mx_button += 34.0f;
+    }
+    ImGui::SetCursorScreenPos(ImVec2(mx_button, by));
     if (gc_icon_button("##activity.more", GC_ICON_KEBAB, GC_MUTED)) {
       gc_menu_url = url; gc_menu_repository = repository;
-      gc_menu_anchor = ImVec2(sx + 66.0f, by + 36.0f); gc_menu_request = true;
+      gc_menu_anchor = ImVec2(mx_button + 32.0f, by + 36.0f); gc_menu_request = true;
     }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("More actions");
   }
@@ -984,13 +1049,13 @@ static bool gc_chip(const char* id, const char* label, bool selected, ImU32 dot)
 
 static bool gc_filters_active(int page) {
   if (page == 5) return !gc_view_reason.empty();
-  if (page == 7) return !gc_release_repository.empty() || gc_release_query[0] != '\0';
+  if (page == 7) return !gc_release_repository.empty() || gc_release_query[0] != '\0' || !gc_view_project.empty();
   return gc_view_kind != 0 || !gc_view_repository.empty() || gc_query_input[0] != '\0';
 }
 
 static void gc_clear_filters() {
   gc_view_kind = 0; gc_view_repository.clear(); gc_query_input[0] = '\0'; gc_view_reason.clear();
-  gc_release_repository.clear(); gc_release_query[0] = '\0';
+  gc_release_repository.clear(); gc_release_query[0] = '\0'; gc_view_project.clear();
 }
 
 static bool gc_kinds_include(const std::vector<std::string>& repository, const char* kind) {
@@ -1005,10 +1070,29 @@ static bool gc_kinds_include(const std::vector<std::string>& repository, const c
 static void gc_repository_and_query_filters(const GcFrame& frame, float x, float width, bool releases) {
   std::string& selected = releases ? gc_release_repository : gc_view_repository;
   gc_font(gc_font_regular, 13.0f);
+  const bool related_toggle = releases && !frame.projects.empty();
+  // With the project filter the two combos share the room.
+  const float combo_w = related_toggle ? 160.0f : 220.0f;
+  if (related_toggle) {
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("Project");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(combo_w);
+    const std::string project_preview = gc_view_project.empty() ? std::string("All base projects") : gc_view_project;
+    if (ImGui::BeginCombo("##filter.project", project_preview.c_str())) {
+      if (ImGui::Selectable("All base projects", gc_view_project.empty())) gc_view_project.clear();
+      for (const auto& project : frame.projects) {
+        const std::string name = gc_field(project, 0);
+        if (ImGui::Selectable(name.c_str(), gc_view_project == name)) gc_view_project = name;
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::SameLine(0.0f, 16.0f);
+  }
   ImGui::AlignTextToFramePadding();
   ImGui::TextDisabled("Repository");
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(220.0f);
+  ImGui::SetNextItemWidth(combo_w);
   const std::string preview = selected.empty() ? std::string("All watched") : selected;
   if (ImGui::BeginCombo("##filter.repository", preview.c_str())) {
     if (ImGui::Selectable("All watched", selected.empty())) selected.clear();
@@ -1020,10 +1104,20 @@ static void gc_repository_and_query_filters(const GcFrame& frame, float x, float
     ImGui::EndCombo();
   }
   ImGui::SameLine(0.0f, 12.0f);
-  const float remaining = x + width - ImGui::GetCursorPosX() - 124.0f;
-  ImGui::SetNextItemWidth(ImMax(160.0f, remaining));
+  // Related only sits just left of Show done (x + width - 108).
+  const float related_w = related_toggle ? gc_text_size(gc_font_regular, 13.0f, "Related only").x + 32.0f : 0.0f;
+  const float related_x = x + width - 108.0f - 16.0f - related_w;
+  const float query_end = related_toggle ? related_x - 16.0f : x + width - 124.0f;
+  ImGui::SetNextItemWidth(ImMax(120.0f, query_end - ImGui::GetCursorPosX()));
   if (releases) {
+    const float query_y = ImGui::GetCursorPosY();
     ImGui::InputTextWithHint("##filter.release-query", "Filter by name, tag, or @author", gc_release_query, sizeof(gc_release_query));
+    if (related_toggle) {
+      ImGui::SetCursorPos(ImVec2(related_x, query_y + 5.0f));
+      ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(3.0f, 3.0f));
+      ImGui::Checkbox("Related only##filter.related-only", &gc_related_only);
+      ImGui::PopStyleVar();
+    }
   } else {
     ImGui::InputTextWithHint("##filter.query", "Filter by title, #number, or @author", gc_query_input, sizeof(gc_query_input));
   }
@@ -1191,7 +1285,7 @@ static int gc_render_activity_page(const GcFrame& frame, float width, double now
       const std::string type = gc_field(row, 0);
       // Rows outside the scrolled viewport only reserve their height, so
       // long lists cost little to draw.
-      const float row_h = type == "G" ? 40.0f : 60.0f;
+      const float row_h = type == "G" ? 40.0f : (type == "I" && !gc_field(row, 16).empty() ? 84.0f : 60.0f);
       if (!ImGui::IsRectVisible(ImVec2(list_w, row_h))) {
         // Advance exactly as the drawn row would: group headers end with a
         // Dummy, other rows move the cursor without item spacing.
@@ -1391,6 +1485,69 @@ static int gc_render_settings(const GcFrame& frame, float width) {
   ImDrawList* draw = ImGui::GetWindowDrawList();
   ImGui::SetCursorPos(ImVec2(pad, ImGui::GetCursorPosY() + 12.0f));
   ImVec2 pos = ImGui::GetCursorScreenPos();
+  // Base projects (ADR 0007): name, what was found, and Rescan and Remove.
+  {
+    const float bp_head = 64.0f;
+    const float bp_row = 78.0f;
+    const float bp_note = 34.0f;
+    const float bp_h = bp_head + ImMax(1.0f, static_cast<float>(frame.projects.size())) * bp_row + bp_note;
+    gc_card_frame(draw, pos, card_w, bp_h, bp_head, "Base projects");
+    gc_text_ellipsis(gc_font_regular, 12.0f, ImVec2(pos.x + 20.0f, pos.y + 36.0f), pos.x + card_w - 200.0f, GC_MUTED,
+                     "Releases are matched against what these repositories use.");
+    const float add_w = gc_button_width("Add base projects", GC_ICON_NONE);
+    ImGui::SetCursorScreenPos(ImVec2(pos.x + card_w - 20.0f - add_w, pos.y + 16.0f));
+    if (gc_button("##base-project.open", "Add base projects", GC_BUTTON_PRIMARY)) gc_project_dialog_request = true;
+    if (frame.projects.empty()) {
+      gc_text(draw, gc_font_regular, 13.0f, ImVec2(pos.x + 20.0f, pos.y + bp_head + 28.0f), GC_MUTED,
+              "No base project yet. Add a repository, or a directory with repositories in it.");
+    }
+    for (size_t k = 0; k < frame.projects.size(); ++k) {
+      const std::vector<std::string>& project = frame.projects[k];
+      const std::string name = gc_field(project, 0);
+      const std::string problem = gc_field(project, 1);
+      const std::string found = gc_field(project, 2);
+      const bool reading = gc_field(project, 3) == "reading";
+      const bool nothing = gc_field(project, 3) == "none";
+      const float y = pos.y + bp_head + k * bp_row;
+      if (k > 0) draw->AddLine(ImVec2(pos.x + 1.0f, y), ImVec2(pos.x + card_w - 1.0f, y), GC_BORDER_MUTED);
+      const ImVec2 icon_box(pos.x + 20.0f, y + 14.0f);
+      draw->AddRectFilled(icon_box, ImVec2(icon_box.x + 32.0f, icon_box.y + 32.0f), GC_HOVER, 8.0f);
+      gc_icon(draw, GC_ICON_REPO, ImVec2(icon_box.x + 8.0f, icon_box.y + 8.0f), 16.0f, GC_MUTED);
+      const float buttons_x = pos.x + card_w - 20.0f - 88.0f - 8.0f - 96.0f;
+      gc_text_ellipsis(gc_font_bold, GC_BODY, ImVec2(pos.x + 64.0f, y + 10.0f), buttons_x - 12.0f, GC_FG, name);
+      float cx = pos.x + 64.0f;
+      // Without chips the status line moves up under the name.
+      const float status_y = (reading || found.empty()) ? y + 36.0f : y + 56.0f;
+      if (!reading) {
+        for (const std::string& chip : gc_split(found, '\x1f')) {
+          if (chip.empty()) continue;
+          if (cx + gc_text_size(gc_font_regular, 12.0f, chip).x + 16.0f > buttons_x - 12.0f) break;
+          cx += gc_pill(draw, ImVec2(cx, y + 32.0f), chip, GC_FG, GC_CANVAS, GC_BORDER) + 6.0f;
+        }
+      }
+      if (reading) {
+        gc_text(draw, gc_font_regular, 12.0f, ImVec2(pos.x + 64.0f, status_y), GC_MUTED, "Reading from GitHub…");
+      } else if (!problem.empty()) {
+        gc_text_ellipsis(gc_font_regular, 12.0f, ImVec2(pos.x + 64.0f, status_y), buttons_x - 12.0f, GC_DANGER, problem);
+      } else if (nothing) {
+        gc_text_ellipsis(gc_font_regular, 12.0f, ImVec2(pos.x + 64.0f, status_y), buttons_x - 12.0f, GC_MUTED,
+                         "No npm, pnpm, Gradle, or Maven files. Other ecosystems aren't read yet, so no release is matched to it.");
+      } else {
+        gc_text(draw, gc_font_regular, 12.0f, ImVec2(pos.x + 64.0f, status_y), GC_MUTED, "Read from GitHub");
+      }
+      ImGui::PushID(name.c_str());
+      ImGui::SetCursorScreenPos(ImVec2(buttons_x, y + 22.0f));
+      if (gc_button("##base-project.rescan", "Rescan", GC_BUTTON_DEFAULT, GC_ICON_REFRESH, false, 96.0f)) action = 38;
+      ImGui::SetCursorScreenPos(ImVec2(buttons_x + 96.0f + 8.0f, y + 22.0f));
+      if (gc_button("##base-project.remove", "Remove", GC_BUTTON_DANGER, GC_ICON_NONE, false, 88.0f)) { gc_selected_key = name; action = 37; }
+      ImGui::PopID();
+    }
+    const float note_y = pos.y + bp_h - bp_note;
+    draw->AddLine(ImVec2(pos.x + 1.0f, note_y), ImVec2(pos.x + card_w - 1.0f, note_y), GC_BORDER_MUTED);
+    gc_text_ellipsis(gc_font_regular, 12.0f, ImVec2(pos.x + 20.0f, note_y + 10.0f), pos.x + card_w - 20.0f, GC_MUTED,
+                     "Read at any depth: npm, pnpm, Gradle, and Maven build files, Java versions, and Spring setting keys. BOM versions come from Maven Central.");
+    pos.y += bp_h + 20.0f;
+  }
   const float head_h = 64.0f;
   const float row_h = 60.0f;
   const float tokens_h = head_h + ImMax(1.0f, static_cast<float>(frame.credentials.size())) * row_h;
@@ -1771,6 +1928,111 @@ static int gc_render_loading_dialog(const GcFrame& frame, double now) {
   return action;
 }
 
+// "Why it is related": every relation of a release, grouped by base
+// project, with the evidence each rule found.
+static int gc_render_why(int page) {
+  // The popover belongs to the page it was opened on.
+  static int opened_on = -1;
+  if (gc_why_request) { ImGui::OpenPopup("##why.related"); gc_why_request = false; opened_on = page; }
+  ImGui::SetNextWindowPos(gc_why_anchor, ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
+  ImGui::SetNextWindowSize(ImVec2(540.0f, 0.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
+  if (ImGui::BeginPopup("##why.related")) {
+    if (page != opened_on) ImGui::CloseCurrentPopup();
+    // Keep it on screen: a popover for a low row opens upward instead.
+    {
+      const ImVec2 display = ImGui::GetIO().DisplaySize;
+      const ImVec2 size = ImGui::GetWindowSize();
+      ImVec2 at = ImGui::GetWindowPos();
+      if (at.y + size.y > display.y - 12.0f) at.y = ImMax(12.0f, gc_why_anchor.y - 40.0f - size.y);
+      if (at.x < 12.0f) at.x = 12.0f;
+      if (at.x != ImGui::GetWindowPos().x || at.y != ImGui::GetWindowPos().y) ImGui::SetWindowPos(at);
+    }
+    gc_font(gc_font_bold, 14.0f);
+    ImGui::TextWrapped("Why %s is related", gc_why_title.c_str());
+    gc_pop_font();
+    std::string last_project;
+    for (const std::string& entry : gc_split(gc_why_data, '\x1e')) {
+      const std::vector<std::string> parts = gc_split(entry, '\x1f');
+      if (parts.size() < 3) continue;
+      if (parts[1] != last_project) {
+        last_project = parts[1];
+        ImGui::Dummy(ImVec2(1.0f, 4.0f));
+        gc_font(gc_font_bold, 12.0f);
+        ImGui::PushStyleColor(ImGuiCol_Text, GC_MUTED);
+        ImGui::TextUnformatted(last_project.c_str());
+        ImGui::PopStyleColor();
+        gc_pop_font();
+      }
+      ImU32 fg, bg, border;
+      gc_relation_colors(parts[0], &fg, &bg, &border);
+      const ImVec2 at = ImGui::GetCursorScreenPos();
+      ImDrawList* draw = ImGui::GetWindowDrawList();
+      gc_pill(draw, at, parts[2], fg, bg, border);
+      ImGui::Dummy(ImVec2(1.0f, 22.0f));
+      for (size_t k = 3; k < parts.size(); ++k) {
+        const ImVec2 line = ImGui::GetCursorScreenPos();
+        const float tag_w = gc_pill(ImGui::GetWindowDrawList(), line, "Rule", GC_MUTED, GC_WHITE, GC_BORDER);
+        ImGui::SetCursorScreenPos(ImVec2(line.x + tag_w + 8.0f, line.y + 2.0f));
+        gc_font(gc_font_regular, 12.0f);
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 540.0f - 36.0f - tag_w - 8.0f);
+        ImGui::TextUnformatted(parts[k].c_str());
+        ImGui::PopTextWrapPos();
+        gc_pop_font();
+      }
+    }
+    ImGui::Dummy(ImVec2(1.0f, 4.0f));
+    gc_font(gc_font_regular, 12.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, GC_MUTED);
+    ImGui::TextWrapped("Rules are checked again on every refresh, from what each base project's repository holds on GitHub.");
+    ImGui::PopStyleColor();
+    gc_pop_font();
+    ImGui::EndPopup();
+  }
+  ImGui::PopStyleVar();
+  return 0;
+}
+
+// Adds base projects: owner/name, or a directory whose repositories are
+// all added.
+static int gc_render_project_dialog() {
+  int action = 0;
+  const char* id = "Add base projects##base-project.dialog";
+  if (gc_project_dialog_request) { gc_project_dialog_request = false; gc_project_input[0] = '\0'; ImGui::OpenPopup(id); }
+  gc_dialog_begin_style();
+  gc_center_next_window(480.0f);
+  if (ImGui::BeginPopupModal(id, nullptr, GC_DIALOG_FLAGS)) {
+    gc_font(gc_font_bold, 16.0f);
+    ImGui::TextUnformatted("Add base projects");
+    gc_pop_font();
+    gc_font(gc_font_regular, 13.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, GC_MUTED);
+    ImGui::TextWrapped("Releases of watched repositories are matched against what these repositories use.");
+    ImGui::PopStyleColor();
+    ImGui::Dummy(ImVec2(1.0f, 4.0f));
+    gc_label("Repository or directory");
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+    const bool submitted = ImGui::InputTextWithHint("##base-project.input", "owner/name, or ~/path/to/repositories", gc_project_input, sizeof(gc_project_input), ImGuiInputTextFlags_EnterReturnsTrue);
+    gc_hint("A directory adds every GitHub repository found in it, two levels down. Files are read from GitHub with your token, which needs Contents: Read-only.");
+    gc_pop_font();
+    ImGui::Dummy(ImVec2(1.0f, 6.0f));
+    const float add_w = gc_button_width("Add", GC_ICON_NONE);
+    const float cancel_w = gc_button_width("Cancel", GC_ICON_NONE);
+    const float row_y = ImGui::GetCursorPosY();
+    ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - 24.0f - add_w - 8.0f - cancel_w, row_y));
+    if (gc_button("##base-project.cancel", "Cancel", GC_BUTTON_DEFAULT)) ImGui::CloseCurrentPopup();
+    ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - 24.0f - add_w, row_y));
+    const bool empty = gc_project_input[0] == '\0';
+    if (gc_button("##base-project.add", "Add", GC_BUTTON_PRIMARY, GC_ICON_NONE, empty) || (submitted && !empty)) {
+      gc_selected_key = gc_project_input; action = 36; ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+  gc_dialog_end_style();
+  return action;
+}
+
 // snackbar: seq message undo. Enters by rising 16 px over 250 ms, stays 5 s.
 static int gc_render_snackbar(const GcFrame& frame, ImVec2 panel_min, ImVec2 panel_max, double now) {
   int action = 0;
@@ -1824,7 +2086,7 @@ static int gc_render_snackbar(const GcFrame& frame, ImVec2 panel_min, ImVec2 pan
 extern "C" int github_client_imgui_render(
   GLFWwindow* window, int page, int busy, int progress_done, int progress_total, int flags,
   uint16_t* nav_text, uint16_t* header_text, uint16_t* rows_text, uint16_t* repositories_text,
-  uint16_t* suggestions_text, uint16_t* credentials_text, uint16_t* banners_text, uint16_t* loading_text,
+  uint16_t* suggestions_text, uint16_t* credentials_text, uint16_t* projects_text, uint16_t* banners_text, uint16_t* loading_text,
   uint16_t* snackbar_text, uint16_t* alert_text, uint16_t* token_text, uint16_t* page_error_text
 ) {
   ImGui_ImplOpenGL3_NewFrame();
@@ -1848,6 +2110,7 @@ extern "C" int github_client_imgui_render(
   frame.repositories = gc_lines(repositories_text);
   frame.suggestions = gc_lines(suggestions_text);
   frame.credentials = gc_lines(credentials_text);
+  frame.projects = gc_lines(projects_text);
   frame.banners = gc_lines(banners_text);
   frame.loading = gc_fields(loading_text);
   frame.snackbar = gc_fields(snackbar_text);
@@ -1927,6 +2190,10 @@ extern "C" int github_client_imgui_render(
   if (overlay) action = overlay;
   overlay = gc_render_token_dialog(frame, now);
   if (overlay) action = overlay;
+  overlay = gc_render_why(frame.page);
+  if (overlay) action = overlay;
+  overlay = gc_render_project_dialog();
+  if (overlay) action = overlay;
   overlay = gc_render_confirm_remove();
   if (overlay) action = overlay;
   overlay = gc_render_alert(frame);
@@ -1981,6 +2248,11 @@ extern "C" moonbit_string_t github_client_imgui_view_query(void) {
 }
 extern "C" moonbit_string_t github_client_imgui_view_reason(void) { return gc_moonbit_string(gc_view_reason); }
 extern "C" int github_client_imgui_view_show_done(void) { return gc_show_done ? 1 : 0; }
+extern "C" moonbit_string_t github_client_imgui_view_project(void) { return gc_moonbit_string(gc_view_project); }
+extern "C" int github_client_imgui_view_related_only(void) { return gc_related_only ? 1 : 0; }
+extern "C" void github_client_imgui_set_view_related_only(int value) { gc_related_only = value != 0; }
+extern "C" void github_client_imgui_set_view_project(const uint16_t* value) { gc_view_project = gc_utf8(value); }
+extern "C" void github_client_imgui_open_why(const uint16_t* url) { gc_why_pending_url = gc_utf8(url); }
 extern "C" int github_client_imgui_auto_refresh_enabled(void) { return gc_auto_refresh_enabled ? 1 : 0; }
 
 extern "C" void github_client_imgui_set_show_done(int value) { gc_show_done = value != 0; }

@@ -4,6 +4,7 @@ test "settings encode/decode roundtrip" {
     include_merged_mentions: true,
     include_closed_mentions: false,
     mention_days: 14,
+    base_repositories: [],
   }
   guard decode(encode(settings)) is Ok(decoded) else {
     fail("encoded settings should decode")
@@ -58,4 +59,16 @@ test "settings decode rejects unknown keys and invalid values" {
       #|line 1 is not key = value
     ),
   )
+}
+
+///|
+test "base repositories round-trip, one per line" {
+  let settings = {
+    ..default_settings(),
+    base_repositories: ["acme/storefront", "tanabe1478/github-client"],
+  }
+  let encoded = encode(settings)
+  assert_true(encoded.contains("base.repository = acme/storefront\n"))
+  assert_eq(decode(encoded), Ok(settings))
+  assert_true(decode("base.repository = not-a-repository") is Err(_))
 }

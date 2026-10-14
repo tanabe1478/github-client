@@ -855,3 +855,120 @@ pub async fn fetch_mention_extras(
   append_unique_activities(mentions, comments)
   repository_failures
 }
+
+///|
+/// What a base project uses, read from its repository. A token that cannot
+/// read files shows up as the profile's problem.
+pub async fn fetch_project_profile(
+  tokens : Map[String, String],
+  repo_scopes : Map[String, String],
+  owner_scopes : Map[String, String],
+  repository : String,
+) -> @domain.ProjectProfile {
+  guard @domain.RepositoryRef::parse(repository) is Ok(reference) else {
+    return {
+      ..@project_reader.parse_files(repository, []),
+      problem: "\{repository} is not owner/name.",
+    }
+  }
+  guard resolve_token(
+      tokens,
+      repo_scopes,
+      owner_scopes,
+      reference.owner(),
+      reference.name(),
+    )
+    is Some(token) else {
+    return {
+      ..@project_reader.parse_files(repository, []),
+      problem: "No saved token can access \{reference.owner()}.",
+    }
+  }
+  // One file list of the default branch, then only the files to read
+  // (ADR 0007).
+  let paths : Array[String] = []
+  let errors : Array[String] = []
+  match @github_api.list_files(token, reference.owner(), reference.name()) {
+    Ok(Some(all)) => paths.append(@project_reader.project_paths(all))
+    Ok(None) => ()
+    Err(error) => {
+      @github_api.log("base-project: \{repository} files: \{error}")
+      errors.push(error)
+    }
+  }
+  let results = @async.all(
+    paths.map(path => {
+      async fn() {
+        @github_api.get_file_content(
+          token,
+          reference.owner(),
+          reference.name(),
+          path,
+        )
+      }
+    }),
+    max_concurrent=8,
+  )
+  let files : Array[(String, String)] = []
+  for index, result in results {
+    match result {
+      Ok(Some(content)) =>
+        files.push((paths[index], @project_reader.decode_base64(content)))
+      Ok(None) => ()
+      Err(error) => {
+        @github_api.log("base-project: \{repository} \{paths[index]}: \{error}")
+        if !errors.contains(error) {
+          errors.push(error)
+        }
+      }
+    }
+  }
+  let mut profile = @project_reader.parse_files(repository, files)
+  // Versions a BOM decides, such as Spring Boot's, from Maven Central. A BOM
+  // that cannot be fetched leaves those dependencies without a version.
+  for coordinate in @project_reader.bom_coordinates(profile) {
+    let (group, artifact, version) = coordinate
+    match @github_api.get_maven_pom(group, artifact, version) {
+      Ok(Some(pom)) =>
+        profile = @project_reader.apply_bom(profile, coordinate, pom)
+      Ok(None) => ()
+      Err(error) =>
+        @github_api.log(
+          "base-project: \{repository} BOM \{group}:\{artifact}:\{version}: \{error}",
+        )
+    }
+  }
+  if errors.is_empty() {
+    profile
+  } else {
+    let reason = if errors.any(error => {
+        @github_api.classify_failure(error) is (Forbidden | Unauthorized)
+      }) {
+      "The token can't read files in this repository; it needs Contents: Read-only."
+    } else if errors.any(error => error.contains("status 301")) {
+      // A local clone keeps the old name after a rename on GitHub.
+      "GitHub says this repository was renamed or moved. Add it under its new name."
+    } else {
+      "Couldn't read the repository: \{errors[0]}"
+    }
+    { ..profile, problem: reason, }
+  }
+}
+
+///|
+/// Profiles for every base project, read concurrently, in the given order.
+pub async fn fetch_project_profiles(
+  tokens : Map[String, String],
+  repo_scopes : Map[String, String],
+  owner_scopes : Map[String, String],
+  repositories : Array[String],
+) -> Array[@domain.ProjectProfile] {
+  @async.all(
+    repositories.map(repository => {
+      async fn() {
+        fetch_project_profile(tokens, repo_scopes, owner_scopes, repository)
+      }
+    }),
+    max_concurrent=6,
+  )
+}

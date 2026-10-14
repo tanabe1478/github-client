@@ -76,6 +76,13 @@ pub struct ActivitySummary {
   tag : String
   summary : String
   prerelease : Bool
+  /// Releases only: the whole notes, which relation rules read.
+  notes : String
+}
+
+///|
+pub fn ActivitySummary::notes(self : ActivitySummary) -> String {
+  self.notes
 }
 
 ///|
@@ -157,6 +164,7 @@ pub fn decode_issues(
           updated_at: item.updated_at,
           tag: "",
           summary: "",
+          notes: "",
           prerelease: false,
           kind: Issue,
           draft: false,
@@ -187,6 +195,7 @@ pub fn decode_pull_requests(
         updated_at: item.updated_at,
         tag: "",
         summary: "",
+        notes: "",
         prerelease: false,
         kind: PullRequest,
         draft: item.draft,
@@ -250,6 +259,7 @@ pub fn decode_activity(
       updated_at: item.updated_at,
       tag: "",
       summary: "",
+      notes: "",
       prerelease: false,
       kind: if item.pull_request is Some(_) {
         PullRequest
@@ -312,6 +322,7 @@ pub fn decode_pull_request_state(
           updated_at: item.updated_at,
           tag: "",
           summary: "",
+          notes: "",
           prerelease: false,
           kind: PullRequest,
           draft: item.draft,

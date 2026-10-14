@@ -6,11 +6,13 @@ Repository code is the source of truth for behavior, accessibility, security, pl
 |---|---|---|
 | `inbox` | Inbox | Open issues and pull requests from watched repositories, grouped by repository, with kind, repository, and text filters |
 | `for-you` | For you | Review requests, assignments, mentions, and subscriptions from watched repositories, merged across every saved credential and deduplicated by activity URL, with a reason filter |
-| `releases` | Releases | Releases of watched repositories that choose Releases, newest first, with repository and text filters |
+| `releases` | Releases | Releases of watched repositories that choose Releases, newest first, with project, repository, and text filters and `Related only` |
 | `saved` | Saved | Activities and releases saved for later, kept independently of their done state |
 | `repositories` | Repositories | Watch by name, watch from account suggestions, unwatch, and choose what each watched repository brings in |
-| `settings` | Settings | Personal access tokens (default and owner/organization scopes), auto refresh, which merged or closed mentions to include and how many days back, and the local data location. The page scrolls when it is taller than the window. Cmd+, (Ctrl+, on Windows) opens it while no dialog is open |
+| `settings` | Settings | Base projects, personal access tokens (default and owner/organization scopes), auto refresh, which merged or closed mentions to include and how many days back, and the local data location. The page scrolls when it is taller than the window. Cmd+, (Ctrl+, on Windows) opens it while no dialog is open |
 | `onboarding` | First launch | Shown on activity pages while no token is saved: connect GitHub, then watch repositories |
+| `base-project-dialog` | Add base projects dialog | Takes owner/name, a GitHub URL, or a directory whose repositories are all added |
+| `why-related` | Why it is related popover | Every rule that matched a release, grouped by base project, with its evidence |
 | `pat-dialog` | Personal access token dialog | Add or replace a token; verifies it with GitHub before saving |
 | `credential-confirm` | Remove token dialog | Confirms removing a token, which cannot be undone |
 | `row-menu` | More actions menu | Copy link, show only the row's repository, and Unsubscribe |
@@ -30,6 +32,14 @@ GitHub's mention filter misses mentions in review comments on pull request diffs
 Mentioned lists open items only by default. In Settings, `Include merged pull requests` and `Include closed issues and pull requests` add those kinds when they were updated within the look-back (`mentions.include_merged`, `mentions.include_closed`, and `mentions.days` in `settings.txt`, see `docs/cli.md`). They come from both the mention filter and review comments and carry a neutral `Merged` or `Closed` label after their reasons. A typed look-back applies when the field loses focus; the step buttons apply at once.
 
 Release rows on Releases show the release name and the first sentence of its notes, then the repository, the tag, `@author`, and `released <date>`, with a `Pre-release` label for pre-releases. Drafts are not listed.
+
+## Base projects
+
+Base projects are GitHub repositories the releases are judged against (ADR 0007). Settings lists them first in a `Base projects` card: each row shows what was read (the package manager, engines, Java, build tool, and known frameworks such as Spring Boot and Spring Framework with their versions, the number of dependencies, the setting files, and how many Spring settings files) and has `Rescan` and `Remove`. `Add base projects` opens a dialog that takes owner/name, a GitHub URL, or a directory on this machine; a directory adds every GitHub repository found in it and is not saved itself. A repository without npm, pnpm, Gradle, or Maven files says that other ecosystems are not read yet, in gray. Only a repository that could not be read (no token, missing Contents permission, renamed) shows its problem in red.
+
+With base projects, Release rows gain a third line of labels, one per base project and rule, colored by kind: `Major update` (yellow), newer in the same major line (blue), a named setting (blue outline), and already in use (gray, not counted as related). Labels that do not fit become `+N`. The info button in the row's actions opens `Why it is related` with every label and its evidence. `Related only` is on by default and hides releases with no related label, with a banner that counts them and offers `Show all`; the `Project` filter keeps releases related to one base project. Without base projects, Releases shows a banner that leads to Settings.
+
+## Row actions
 
 Every row has explicit trailing actions: `Open`, `Done` (or `Move to inbox` for done rows), a Save toggle, and a More actions button. The menu holds `Copy link`, `Show only this repository`, and, separated below them, `Unsubscribe`. Row click and double click are not actions.
 

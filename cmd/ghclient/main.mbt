@@ -34,7 +34,23 @@ fn kind_name(kind : @domain.InboxItemKind) -> String {
 }
 
 ///|
-fn item_json(item : @domain.ActivityItem, read : Bool, saved : Bool) -> Json {
+fn relation_json(relation : @domain.Relation) -> Json {
+  {
+    "project": relation.project.to_json(),
+    "kind": relation.kind.name().to_json(),
+    "label": relation.label.to_json(),
+    "related": relation.counts().to_json(),
+    "evidence": relation.evidence.to_json(),
+  }
+}
+
+///|
+fn item_json(
+  item : @domain.ActivityItem,
+  read : Bool,
+  saved : Bool,
+  relations? : Array[@domain.Relation]? = None,
+) -> Json {
   let json : Json = {
     "url": item.url.to_json(),
     "repository": item.repository.to_json(),
@@ -54,6 +70,11 @@ fn item_json(item : @domain.ActivityItem, read : Bool, saved : Bool) -> Json {
       fields.set("tag", item.tag.to_json())
       fields.set("summary", item.summary.to_json())
       fields.set("prerelease", item.prerelease.to_json())
+      match relations {
+        Some(found) =>
+          fields.set("relations", found.map(relation_json).to_json())
+        None => ()
+      }
     }
     _ => ()
   }
@@ -264,6 +285,42 @@ async fn Session::fetch_personal(
 }
 
 ///|
+/// Base projects from settings.txt, read from GitHub. When a token cannot
+/// reach one and more tokens are saved, the token assignment is loaded and
+/// it is read again.
+async fn Session::fetch_profiles(
+  self : Session,
+) -> Array[@domain.ProjectProfile] {
+  let repositories = load_settings_or_default().base_repositories
+  let profiles = @activity_sync.fetch_project_profiles(
+    self.tokens,
+    self.repo_scopes,
+    self.owner_scopes,
+    repositories,
+  )
+  let retry = profiles.any(profile => {
+    profile.problem.has_prefix("The token can't") ||
+    profile.problem.has_prefix("No saved token") ||
+    profile.problem.has_prefix("Couldn't read the repository")
+  })
+  if retry && !self.scopes_loaded && self.tokens.length() > 1 {
+    self.load_scopes()
+    return @activity_sync.fetch_project_profiles(
+      self.tokens,
+      self.repo_scopes,
+      self.owner_scopes,
+      repositories,
+    )
+  }
+  profiles
+}
+
+///|
+fn load_settings_or_default() -> @settings_store.Settings {
+  @settings_store.load_default().unwrap_or(@settings_store.default_settings())
+}
+
+///|
 async fn Session::fetch_activity(
   self : Session,
   url : String,
@@ -355,6 +412,7 @@ fn print_items(
   saved : Map[String, Bool],
   errors : Array[FetchError],
   incomplete? : Map[String, Bool] = Map([]),
+  relations? : Map[String, Array[@domain.Relation]]? = None,
 ) -> Int {
   let warnings : Array[String] = []
   for name, _ in incomplete {
@@ -364,11 +422,28 @@ fn print_items(
   }
   let filter = invocation.filter()
   let index = @domain.read_index(markers)
+  let related_of = (item : @domain.ActivityItem) => {
+    relations
+    .map(map => map.get(item.url).unwrap_or([]))
+    .unwrap_or([])
+    // With --project, only that project's relations are shown.
+    .filter(relation => {
+      invocation.project == "" || relation.project == invocation.project
+    })
+  }
   let visible = items.filter(item => {
     @domain.matches_filter(
       item,
       filter,
       @domain.is_read_in(index, item.url, item.updated_at),
+    ) &&
+    (
+    // --project implies --related for that project.
+      !(invocation.related || invocation.project != "") ||
+      related_of(item).any(relation => {
+        relation.counts() &&
+        (invocation.project == "" || relation.project == invocation.project)
+      })
     )
   })
   visible.sort_by((a, b) => b.updated_at.compare(a.updated_at))
@@ -380,6 +455,7 @@ fn print_items(
           item,
           @domain.is_read_in(index, item.url, item.updated_at),
           saved.contains(item.url),
+          relations=relations.map(_ => related_of(item)),
         )
       })
       .to_json(),
@@ -399,6 +475,9 @@ fn print_items(
           saved.contains(item.url),
         ),
       )
+      for relation in related_of(item) {
+        println("    \{relation.project} · \{relation.label}")
+      }
     }
     if visible.is_empty() {
       println("No items.")
@@ -558,13 +637,158 @@ async fn run(invocation : Invocation) -> Int {
         })
       }
       let (_, releases) = session.fetch_watched(chosen, releases_only)
+      let profiles = session.fetch_profiles()
+      let relations : Map[String, Array[@domain.Relation]] = Map([])
+      for release in releases {
+        relations.set(
+          release.html_url(),
+          @domain.release_relations(
+            release.repository(),
+            release.tag(),
+            release.notes(),
+            profiles,
+          ),
+        )
+      }
       print_items(
         invocation,
         @activity_sync.watched_items([releases], muted),
         load_markers(),
         saved,
         session.errors,
+        relations=Some(relations),
       )
+    }
+    "projects" => {
+      let (session, _) = load_session()
+      let profiles = session.fetch_profiles()
+      if invocation.json {
+        let json : Json = {
+          "projects": profiles
+          .map(profile => {
+            let json : Json = {
+              "repository": profile.name.to_json(),
+              "package_name": profile.package_name.to_json(),
+              "tools": profile.tools
+              .map(tool => {
+                let json : Json = {
+                  "name": tool.name.to_json(),
+                  "version": tool.version.to_json(),
+                  "exact": tool.exact.to_json(),
+                  "source": tool.source.to_json(),
+                }
+                json
+              })
+              .to_json(),
+              "settings": profile.settings
+              .map(setting => {
+                let json : Json = {
+                  "key": setting.key.to_json(),
+                  "file": setting.file.to_json(),
+                }
+                json
+              })
+              .to_json(),
+              "files": profile.files.to_json(),
+              "dependency_count": profile.dependency_count.to_json(),
+              "managed": profile.managed.to_json(),
+              "problem": profile.problem.to_json(),
+            }
+            json
+          })
+          .to_json(),
+        }
+        println(json.stringify())
+      } else {
+        if profiles.is_empty() {
+          println("No base projects. Add one with ghclient project-add.")
+        }
+        for profile in profiles {
+          println(profile.name)
+          if profile.problem != "" {
+            println("  problem: \{profile.problem}")
+          } else if profile.files.is_empty() {
+            println(
+              "  no npm, pnpm, Gradle, or Maven files; other ecosystems are not read yet",
+            )
+          }
+          for headline in @domain.headline_tools(profile) {
+            println("  \{headline}")
+          }
+          println(
+            "  \{profile.dependency_count} dependencies · \{profile.settings.length()} settings in \{setting_files(profile)} files · \{profile.files.length()} files read",
+          )
+        }
+      }
+      if profiles.any(profile => profile.problem != "") {
+        3
+      } else {
+        0
+      }
+    }
+    "project-add" | "project-remove" => {
+      let settings = load_settings_or_default()
+      let repositories = settings.base_repositories.copy()
+      let results : Array[(String, Result[String, String])] = []
+      for argument in invocation.arguments {
+        let raw = @project_reader.repository_input(argument)
+        if invocation.command == "project-remove" {
+          if repositories.contains(raw) {
+            repositories.retain(repository => repository != raw)
+            results.push((raw, Ok("removed")))
+          } else {
+            results.push((raw, Err("not a base project")))
+          }
+          continue
+        }
+        // A directory that exists adds the repositories found under it;
+        // anything else is read as owner/name.
+        let directory = @project_reader.expand_home(raw)
+        if @project_reader.is_directory(directory) {
+          match @project_reader.discover_repositories(raw) {
+            Ok(found) => {
+              let added = found.filter(name => !repositories.contains(name))
+              repositories.append(added)
+              results.push(
+                (
+                  raw,
+                  Ok(
+                    "added \{added.length()} of \{found.length()} repositories found: \{found.join(", ")}",
+                  ),
+                ),
+              )
+            }
+            Err(message) => results.push((raw, Err(message)))
+          }
+        } else {
+          match @domain.RepositoryRef::parse(raw) {
+            Ok(reference) => {
+              let key = reference.key()
+              if repositories.contains(key) {
+                results.push((key, Ok("already a base project")))
+              } else {
+                repositories.push(key)
+                results.push((key, Ok("added")))
+              }
+            }
+            Err(_) =>
+              results.push(
+                (raw, Err("not an existing directory or owner/name")),
+              )
+          }
+        }
+      }
+      match
+        @settings_store.save_default({
+          ..settings,
+          base_repositories: repositories,
+        }) {
+        Ok(_) => print_results(invocation, results)
+        Err(error) => {
+          print_error("could not save settings: \{error}")
+          1
+        }
+      }
     }
     "saved" => {
       let (session, _) = load_session()
@@ -833,4 +1057,16 @@ async fn main {
     }
   })
   @sys.exit(run(invocation))
+}
+
+///|
+/// How many files a profile's settings come from.
+fn setting_files(profile : @domain.ProjectProfile) -> Int {
+  let files : Array[String] = []
+  for setting in profile.settings {
+    if !files.contains(setting.file) {
+      files.push(setting.file)
+    }
+  }
+  files.length()
 }
