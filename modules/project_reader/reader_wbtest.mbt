@@ -321,3 +321,111 @@ test "a BOM decides the versions left to it and known packages" {
     "Spring Boot 3.4.2 BOM sets org.springframework:spring-framework-bom: 6.2.2",
   )
 }
+
+///|
+test "Node.js versions come from version files and mise" {
+  let profile = parse_files("acme/web", [
+    (".node-version", "22.20.0\n"),
+    ("app/.nvmrc", "v20\n"),
+    (
+      "mise.toml", "[env]\nnode = \"ignored\"\n[tools]\nnode = \"22.11.0\"\njava = \"temurin-21\"\n",
+    ),
+    (".tool-versions", "nodejs 22.20.0\nterraform 1.10.0\n"),
+  ])
+  assert_eq(
+    profile.tools.map(tool => {
+      "\{tool.name} \{tool.version} \{tool.exact} \{tool.source}"
+    }),
+    [
+      "node 22.20.0 true .node-version", "node 20 false app/.nvmrc", "node 22.11.0 true mise.toml",
+      "java 21 true mise.toml", "node 22.20.0 true .tool-versions",
+    ],
+  )
+  assert_eq(@domain.headline_tools(profile), ["Node.js 22.20.0", "Java 21"])
+}
+
+///|
+test "workflows give the actions they use as repositories" {
+  let workflow =
+    #|jobs:
+    #|  build:
+    #|    steps:
+    #|      - uses: actions/checkout@v4
+    #|      - uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
+    #|      - uses: github/codeql-action/init@v3.28.1
+    #|      - uses: ./.github/actions/build
+    #|      - uses: docker://alpine:3.20
+    #|      - uses: acme/deploy@main
+    #|  call:
+    #|    uses: acme/workflows/.github/workflows/release.yml@v2
+  let profile = parse_files("acme/service", [
+    (".github/workflows/ci.yml", workflow),
+  ])
+  assert_eq(
+    profile.tools.map(tool => "\{tool.name} \{tool.version} \{tool.exact}"),
+    [
+      "actions/checkout 4 false", "actions/setup-java 4.7.0 true", "github/codeql-action 3.28.1 true",
+      "acme/workflows 2 false",
+    ],
+  )
+}
+
+///|
+test "Terraform gives its version and providers by repository" {
+  let config =
+    #|terraform {
+    #|  required_version = "~> 1.10.0"
+    #|  backend "s3" {}
+    #|  required_providers {
+    #|    aws = {
+    #|      source  = "hashicorp/aws"
+    #|      version = "~> 5.0"
+    #|    }
+    #|    github = {
+    #|      source = "integrations/github"
+    #|      version = ">= 6.2"
+    #|    }
+    #|  }
+    #|}
+    #|module "vpc" {
+    #|  source  = "terraform-aws-modules/vpc/aws"
+    #|  version = "5.8.1"
+    #|}
+  let lock =
+    #|provider "registry.terraform.io/hashicorp/aws" {
+    #|  version     = "5.80.0"
+    #|  constraints = "~> 5.0"
+    #|  hashes = [
+    #|    "h1:abc=",
+    #|  ]
+    #|}
+  let profile = parse_files("acme/infra", [
+    ("envs/dev/terraform.tf", config),
+    ("envs/dev/.terraform.lock.hcl", lock),
+  ])
+  assert_eq(
+    profile.tools.map(tool => "\{tool.name} \{tool.version} \{tool.exact}"),
+    [
+      "hashicorp/terraform ~> 1.10.0 false", "hashicorp/terraform-provider-aws ~> 5.0 false",
+      "integrations/terraform-provider-github >= 6.2 false", "hashicorp/terraform-provider-aws 5.80.0 true",
+    ],
+  )
+  assert_eq(@domain.headline_tools(profile), ["Terraform ~> 1.10.0"])
+  let relations = @domain.release_relations(
+    "hashicorp/terraform-provider-aws",
+    "v5.81.0",
+    "",
+    [profile],
+  )
+  assert_eq(
+    relations[0].label,
+    "hashicorp/terraform-provider-aws 5.80.0 → 5.81.0",
+  )
+  let major = @domain.release_relations(
+    "hashicorp/terraform-provider-aws",
+    "v6.0.0",
+    "",
+    [profile],
+  )
+  assert_eq(major[0].kind, @domain.MajorUpdate)
+}

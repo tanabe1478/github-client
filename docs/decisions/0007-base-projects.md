@@ -24,7 +24,9 @@ ADR 0006でリリースを受け取れるようになった。しかし、どの
 
 ### 読み取るもの
 
-npm、pnpm、Gradle、Mavenを対象にする。既定branchのファイル一覧を1回取り（Gitのtree API）、下のファイルを深さを問わず読む。`node_modules`、`build`、`target`などの生成物と、`test`、`fixtures`、`examples`などのテスト用のディレクトリは除く。浅いものから最大80ファイルまでにする。
+npm、pnpm、Gradle、Maven、GitHub Actions、Terraformを対象にする。既定branchのファイル一覧を1回取り（Gitのtree API）、下のファイルを深さを問わず読む。`node_modules`、`build`、`target`、`.terraform`などの生成物と、`test`、`fixtures`、`examples`などのテスト用のディレクトリは除く。浅いものから最大150ファイルまでにする。
+
+エコシステムは、依存からGitHubのリポジトリが確実に分かるものを優先する。このアプリはWatchしたGitHubのリポジトリのリリースを結び付けるためである。GitHub Actions（`uses: owner/repo@v4`）とTerraformのprovider（`hashicorp/aws`は`hashicorp/terraform-provider-aws`）は、外部のregistryに問い合わせずにリポジトリが決まる。Dockerのimageとpipは、リポジトリとの対応に対応表か外部への問い合わせが要るため、後の段階にする。
 
 | ファイル | 読み取る内容 |
 |---|---|
@@ -36,7 +38,11 @@ npm、pnpm、Gradle、Mavenを対象にする。既定branchのファイル一�
 | `build.gradle(.kts)`、`settings.gradle(.kts)`、`buildSrc`と`build-logic`のconvention plugin | 版を書いたプラグイン（`id("org.springframework.boot") version "3.4.2"`）、`"group:artifact:version"`の依存、版を書かない依存（`implementation("group:artifact")`）、Javaの版（`JavaLanguageVersion.of(21)`、`jvmToolchain(21)`、`JavaVersion.VERSION_21`） |
 | `pom.xml` | `parent`（`spring-boot-starter-parent`など）、Javaの版（`java.version`、`maven.compiler.release`など）、`dependency`と`plugin`。`${...}`は`properties`から解決する |
 | ルートの`gradle.properties` | 設定のkey |
-| ルートの`.sdkmanrc`、`.java-version`、`.tool-versions` | Javaの版 |
+| ルートの`.sdkmanrc`、`.java-version`、`.tool-versions`、`mise.toml` | JavaとNode.jsの版 |
+| `.node-version`、`.nvmrc` | Node.jsの版（`22`のような系列の指定も読む） |
+| `.github/workflows/*.yml`、`action.yml` | `uses:`のactionをowner/repoと版で。commitに固定したものは、後ろのコメント（`# v4.2.2`）を版とする。ローカルのaction、Docker image、branchの指定は除く |
+| `terraform.tf`、`versions.tf`、`providers.tf` | `required_version`（`hashicorp/terraform`として）と、`required_providers`のproviderをGitHubのリポジトリ名と制約で。`module`は読まない |
+| `.terraform.lock.hcl` | providerの確定した版 |
 | `src/main/resources/application*.yml`、`.yaml`、`.properties` | Springの設定のkey（`spring.jpa.open-in-view`の形） |
 
 設定ファイルの値は読み込まない（credentialが入りうるため）。
@@ -49,6 +55,8 @@ npm、pnpm、Gradle、Mavenを対象にする。既定branchのファイル一�
 - 版を書かない依存は、BOMにその依存があればその版、なければBOMが同じgroupのBOMをimportしていればその版にする（`spring-session-bom`など）。
 - 既知のパッケージ（Spring Frameworkなど）はBOMの版をそのまま使う。BOM自身のgroup（Spring Bootのstarter群）は足さない。
 - BOMがimportするBOM（`jackson-bom`など）の中はたどらない。BOMが取れないときは、その依存は版なしのままにする。
+
+GitHubで改名や移動されたリポジトリは、旧名に301が返る。転送先（`/repositories/<id>`）から新しい名前を引き、Settingsに「Use new name」を出す。押すと`settings.txt`の名前を置き換える。黙って新しい名前で読むことはしない。`settings.txt`と画面の名前が食い違うためである。
 
 対象のファイルがないリポジトリは読み取りの失敗として扱わない。Settingsでは、ほかのエコシステムはまだ読まないことを灰色で示し、どのリリースとも関連付けない。赤字で示すのは、tokenや権限がない、改名されたなど、読めなかったときだけにする。
 
@@ -63,8 +71,8 @@ lockfile（`pnpm-lock.yaml`、`package-lock.json`、`gradle.lockfile`）、SBOM�
 | ラベル | 条件 |
 |---|---|
 | Major update | プロジェクトが使う版より新しく、メジャーバージョンが上がっている |
-| Newer than in use | プロジェクトが使う版より新しく、同じメジャーバージョン |
-| In use | プロジェクトがこの版かそれより新しい版を使っている。表示はするが、関連には数えない |
+| Newer than in use | プロジェクトが使う版より新しく、同じメジャーバージョン。範囲で指定していて、その範囲に入らない新しい版（Terraformの`~> 1.10.0`に対する1.16.5）も含む |
+| In use | プロジェクトがこの版かそれより新しい版を使っているか、範囲がこの版を許す。表示はするが、関連には数えない。範囲は`^`、`~`、`>=`、Terraformの`~>`（`~> 5.0`は5の中、`~> 1.8.0`は1.8の中）、系列の指定（`v4`、`22`）を解釈する |
 | Uses a setting | リリースノートやissueの本文に、プロジェクトの設定ファイルにあるkeyが出てくる。コードスパン（`` `key` ``）のほか、ドットを2つ以上含む語（`spring.threads.virtual.enabled`）も地の文から拾う。まとまり（`spring.security.oauth2`）はその下のkeyにも一致する。同じ語は、いくつのファイルとkeyに当たっても1つのラベルにする |
 | Mentions the project | issueやPRが、プロジェクトのリポジトリ名かパッケージ名に触れている |
 
@@ -92,10 +100,10 @@ AIにはJev、Claudeなどを選べるようにし、アプリとファイルの
 
 ## 段階
 
-1. リポジトリのベースプロジェクトとディレクトリからの一括登録、npm、pnpm、Gradle、Mavenのファイル（下位のディレクトリを含む）とJavaの版とSpringの設定の読み取り、BOMによる版の解決、決定論的な規則、Releasesでの表示と絞り込み、Settingsのカード。
+1. リポジトリのベースプロジェクトとディレクトリからの一括登録、改名への追従、npm、pnpm、Gradle、Maven、GitHub Actions、Terraformのファイル（下位のディレクトリを含む）とJavaとNode.jsの版とSpringの設定の読み取り、BOMによる版の解決、決定論的な規則、Releasesでの表示と絞り込み、Settingsのカード。
 2. AIの判断の記録（`ghclient`のコマンド）、根拠の確認、表示。
 3. lockfileとSBOMの読み取り（推移的な依存）。
-4. セキュリティ勧告、npm registryとMaven Centralでのパッケージとリポジトリの対応、ほかのエコシステム。
+4. セキュリティ勧告、npm registryとMaven Centralでのパッケージとリポジトリの対応、Terraformのmodule、Dockerのimageとpipなどほかのエコシステム。
 
 ## 検討した案
 

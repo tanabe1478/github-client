@@ -1508,6 +1508,7 @@ static int gc_render_settings(const GcFrame& frame, float width) {
       const std::string found = gc_field(project, 2);
       const bool reading = gc_field(project, 3) == "reading";
       const bool nothing = gc_field(project, 3) == "none";
+      const std::string moved_to = gc_field(project, 4);
       const float y = pos.y + bp_head + k * bp_row;
       if (k > 0) draw->AddLine(ImVec2(pos.x + 1.0f, y), ImVec2(pos.x + card_w - 1.0f, y), GC_BORDER_MUTED);
       const ImVec2 icon_box(pos.x + 20.0f, y + 14.0f);
@@ -1531,13 +1532,17 @@ static int gc_render_settings(const GcFrame& frame, float width) {
         gc_text_ellipsis(gc_font_regular, 12.0f, ImVec2(pos.x + 64.0f, status_y), buttons_x - 12.0f, GC_DANGER, problem);
       } else if (nothing) {
         gc_text_ellipsis(gc_font_regular, 12.0f, ImVec2(pos.x + 64.0f, status_y), buttons_x - 12.0f, GC_MUTED,
-                         "No npm, pnpm, Gradle, or Maven files. Other ecosystems aren't read yet, so no release is matched to it.");
+                         "Nothing this app reads was found (npm, Gradle, Maven, GitHub Actions, Terraform), so no release is matched to it.");
       } else {
         gc_text(draw, gc_font_regular, 12.0f, ImVec2(pos.x + 64.0f, status_y), GC_MUTED, "Read from GitHub");
       }
       ImGui::PushID(name.c_str());
       ImGui::SetCursorScreenPos(ImVec2(buttons_x, y + 22.0f));
-      if (gc_button("##base-project.rescan", "Rescan", GC_BUTTON_DEFAULT, GC_ICON_REFRESH, false, 96.0f)) action = 38;
+      if (!moved_to.empty()) {
+        // A renamed repository: Use new name takes Rescan's place.
+        if (gc_button("##base-project.follow", "Use new name", GC_BUTTON_PRIMARY, GC_ICON_NONE, false, 96.0f)) { gc_selected_key = name; action = 39; }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Replace it with %s", moved_to.c_str());
+      } else if (gc_button("##base-project.rescan", "Rescan", GC_BUTTON_DEFAULT, GC_ICON_REFRESH, false, 96.0f)) action = 38;
       ImGui::SetCursorScreenPos(ImVec2(buttons_x + 96.0f + 8.0f, y + 22.0f));
       if (gc_button("##base-project.remove", "Remove", GC_BUTTON_DANGER, GC_ICON_NONE, false, 88.0f)) { gc_selected_key = name; action = 37; }
       ImGui::PopID();
@@ -1545,7 +1550,7 @@ static int gc_render_settings(const GcFrame& frame, float width) {
     const float note_y = pos.y + bp_h - bp_note;
     draw->AddLine(ImVec2(pos.x + 1.0f, note_y), ImVec2(pos.x + card_w - 1.0f, note_y), GC_BORDER_MUTED);
     gc_text_ellipsis(gc_font_regular, 12.0f, ImVec2(pos.x + 20.0f, note_y + 10.0f), pos.x + card_w - 20.0f, GC_MUTED,
-                     "Read at any depth: npm, pnpm, Gradle, and Maven build files, Java versions, and Spring setting keys. BOM versions come from Maven Central.");
+                     "Read at any depth: npm, Gradle, Maven, GitHub Actions, Terraform, Java and Node.js versions, and Spring setting keys. BOMs come from Maven Central.");
     pos.y += bp_h + 20.0f;
   }
   const float head_h = 64.0f;

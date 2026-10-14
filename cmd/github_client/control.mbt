@@ -120,6 +120,8 @@ fn poll_control_commands(
       "project-remove" if argument != "" =>
         queue.push({ ..control_command(37), key: argument, })
       "project-rescan" => queue.push(control_command(38))
+      "project-follow" if argument != "" =>
+        queue.push({ ..control_command(39), key: argument, })
       "related-only" =>
         github_client_imgui_set_view_related_only(
           if argument == "0" {

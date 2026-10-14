@@ -197,3 +197,39 @@ pub async fn get_file_content(
       }
   }
 }
+
+///|
+/// owner/name a renamed or moved repository now has, or None when GitHub
+/// does not answer with a move. GitHub answers the old name with 301 and
+/// the new location as /repositories/<id>.
+pub async fn moved_repository(
+  token : String,
+  owner : String,
+  name : String,
+) -> Result[String?, String] {
+  let location = try {
+    let (response, _) = @http.get(
+      "https://api.github.com/repos/\{owner}/\{name}",
+      headers=request_headers(token),
+    )
+    log("http: status=\{response.code} path=/repos/\{owner}/\{name} (move)")
+    guard response.code == 301 || response.code == 302 || response.code == 307 else {
+      return Ok(None)
+    }
+    response.headers.get(@http.CaseInsensitiveString("Location"))
+  } catch {
+    _ => return Err("GitHub request failed before a response was received")
+  }
+  guard location is Some(url) && url.find("/repositories/") is Some(at) else {
+    return Ok(None)
+  }
+  match get_json(token, url[at:].to_owned()) {
+    Ok(Object(fields)) =>
+      match fields.get("full_name") {
+        Some(String(full_name)) => Ok(Some(full_name))
+        _ => Ok(None)
+      }
+    Ok(_) => Ok(None)
+    Err(error) => Err(error)
+  }
+}

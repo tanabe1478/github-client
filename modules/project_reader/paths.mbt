@@ -11,8 +11,13 @@ priv enum FileKind {
   GradleScript
   Pom
   GradleProperties
-  /// .java-version, .sdkmanrc, or .tool-versions.
-  JavaVersionFile
+  /// .java-version, .sdkmanrc, .tool-versions, mise.toml, .node-version,
+  /// or .nvmrc.
+  VersionFile
+  /// A GitHub Actions workflow or a composite action.
+  Workflow
+  /// terraform.tf, versions.tf, providers.tf, or .terraform.lock.hcl.
+  Terraform
   /// application*.yml, .yaml, or .properties in src/main/resources.
   SpringConfig
   Other
@@ -27,7 +32,7 @@ let excluded_segments : Array[String] = [
 
 ///|
 /// The most files read from one base project.
-pub const MAX_PROJECT_FILES : Int = 80
+pub const MAX_PROJECT_FILES : Int = 150
 
 ///|
 fn file_kind(path : String) -> FileKind {
@@ -44,14 +49,20 @@ fn file_kind(path : String) -> FileKind {
     | "settings.gradle.kts" => GradleScript
     "pom.xml" => Pom
     "gradle.properties" => if root { GradleProperties } else { Other }
-    ".java-version" | ".sdkmanrc" | ".tool-versions" =>
-      if root {
-        JavaVersionFile
-      } else {
-        Other
-      }
+    ".java-version"
+    | ".sdkmanrc"
+    | ".tool-versions"
+    | "mise.toml"
+    | ".mise.toml" => if root { VersionFile } else { Other }
+    ".node-version" | ".nvmrc" => VersionFile
+    "terraform.tf" | "versions.tf" | "providers.tf" | ".terraform.lock.hcl" =>
+      Terraform
+    "action.yml" | "action.yaml" => Workflow
     _ =>
-      if name.has_suffix(".versions.toml") && path.contains("gradle/") {
+      if path.has_prefix(".github/workflows/") &&
+        (name.has_suffix(".yml") || name.has_suffix(".yaml")) {
+        Workflow
+      } else if name.has_suffix(".versions.toml") && path.contains("gradle/") {
         VersionCatalog
       } else if (
           path.has_prefix("buildSrc/") || path.has_prefix("build-logic/")

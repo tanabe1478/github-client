@@ -947,7 +947,17 @@ pub async fn fetch_project_profile(
       "The token can't read files in this repository; it needs Contents: Read-only."
     } else if errors.any(error => error.contains("status 301")) {
       // A local clone keeps the old name after a rename on GitHub.
-      "GitHub says this repository was renamed or moved. Add it under its new name."
+      match
+        @github_api.moved_repository(token, reference.owner(), reference.name()) {
+        Ok(Some(moved_to)) =>
+          return {
+            ..profile,
+            problem: "GitHub says this repository is now \{moved_to}.",
+            moved_to,
+          }
+        _ =>
+          "GitHub says this repository was renamed or moved. Add it under its new name."
+      }
     } else {
       "Couldn't read the repository: \{errors[0]}"
     }

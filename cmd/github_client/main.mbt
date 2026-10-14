@@ -1794,7 +1794,18 @@ async fn main {
           show_repository,
           fresh_since,
           now,
-          relations=if page is Releases { relation_index } else { Map([]) },
+          relations=if !(page is Releases) {
+            Map([])
+          } else if view_project == "" {
+            relation_index
+          } else {
+            // With a project chosen, rows show only that project's labels.
+            let shown : Map[String, Array[@domain.Relation]] = Map([])
+            for item in shown_releases {
+              shown.set(item.url, project_relations(item.url))
+            }
+            shown
+          },
         ),
         repositories_text(watched, watch_options),
         suggestions_text(
@@ -2113,6 +2124,24 @@ async fn main {
             ) {
             notify("Removed \{name} from base projects.", None)
             println("ui-action: base-project.remove \{name}")
+          }
+        }
+        39 => {
+          // Use the name a renamed base project has now.
+          let name = github_client_imgui_take_key()
+          match profiles.filter(profile => profile.name == name) {
+            [profile, ..] if profile.moved_to != "" => {
+              let moved_to = profile.moved_to
+              let next = settings.base_repositories.filter(repository => {
+                repository != name && repository != moved_to
+              })
+              next.push(moved_to)
+              if save_base_repositories(next) {
+                notify("Now using \{moved_to} instead of \{name}.", None)
+                println("ui-action: base-project.follow \{name} -> \{moved_to}")
+              }
+            }
+            _ => ()
           }
         }
         38 => {

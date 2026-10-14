@@ -692,6 +692,7 @@ async fn run(invocation : Invocation) -> Int {
               "files": profile.files.to_json(),
               "dependency_count": profile.dependency_count.to_json(),
               "managed": profile.managed.to_json(),
+              "moved_to": profile.moved_to.to_json(),
               "problem": profile.problem.to_json(),
             }
             json
@@ -707,9 +708,16 @@ async fn run(invocation : Invocation) -> Int {
           println(profile.name)
           if profile.problem != "" {
             println("  problem: \{profile.problem}")
-          } else if profile.files.is_empty() {
+          } else if profile.tools.is_empty() &&
+            profile.settings.is_empty() &&
+            profile.dependency_count == 0 {
             println(
-              "  no npm, pnpm, Gradle, or Maven files; other ecosystems are not read yet",
+              "  nothing this app reads (npm, Gradle, Maven, GitHub Actions, Terraform) was found",
+            )
+          }
+          if profile.moved_to != "" {
+            println(
+              "  now \{profile.moved_to}: ghclient project-remove \{profile.name} && ghclient project-add \{profile.moved_to}",
             )
           }
           for headline in @domain.headline_tools(profile) {

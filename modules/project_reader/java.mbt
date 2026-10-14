@@ -484,30 +484,6 @@ fn push_java(
 }
 
 ///|
-/// The Java version of `.java-version` ("21" or "temurin-21.0.2"),
-/// `.sdkmanrc` ("java=21.0.6-tem"), or `.tool-versions` ("java temurin-21").
-fn read_java_version_file(
-  file : String,
-  source : String,
-  tools : Array[@domain.ProjectTool],
-) -> Unit {
-  for raw in source.split("\n") {
-    let line = raw.trim().to_owned()
-    if line == "" || line.has_prefix("#") {
-      continue
-    }
-    if file.has_suffix(".java-version") {
-      push_java(tools, line, file)
-      return
-    }
-    if line.has_prefix("java=") || line.has_prefix("java ") {
-      push_java(tools, line[5:].to_owned(), file)
-      return
-    }
-  }
-}
-
-///|
 /// Setting keys of a Spring `application.yml`, as dotted paths of the
 /// values: `spring.jpa.open-in-view`. List items and values are skipped.
 pub fn yaml_keys(source : String) -> Array[String] {

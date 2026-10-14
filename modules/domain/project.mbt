@@ -35,6 +35,8 @@ pub(all) struct ProjectProfile {
   managed : Array[String]
   /// Why something could not be read; "" when everything was read.
   problem : String
+  /// owner/name the repository was renamed or moved to, or "".
+  moved_to : String
 } derive(Eq, Debug)
 
 ///|
@@ -82,7 +84,7 @@ pub fn Relation::counts(self : Relation) -> Bool {
 let known_packages : Map[String, (String, String)] = Map([
   ("pnpm/pnpm", ("pnpm", "pnpm")),
   ("npm/cli", ("npm", "npm")),
-  ("nodejs/node", ("node", "node")),
+  ("nodejs/node", ("node", "Node.js")),
   ("yarnpkg/berry", ("yarn", "yarn")),
   ("spring-projects/spring-boot", ("org.springframework.boot", "Spring Boot")),
   (
@@ -90,6 +92,7 @@ let known_packages : Map[String, (String, String)] = Map([
     ("org.springframework", "Spring Framework"),
   ),
   ("gradle/gradle", ("gradle", "Gradle")),
+  ("hashicorp/terraform", ("hashicorp/terraform", "Terraform")),
 ])
 
 ///|
@@ -162,14 +165,15 @@ pub fn headline_tools(profile : ProjectProfile) -> Array[String] {
     }
     let headline = known is Some(_) ||
       tool.name == "java" ||
+      tool.name == "node" ||
       tool.source.has_suffix("packageManager") ||
       tool.source.has_suffix("engines") ||
       tool.source.has_suffix("parent") ||
       tool.source.has_suffix("java.version")
-    let name = if tool.name == "java" {
-      "Java"
-    } else {
-      known.unwrap_or(tool.name)
+    let name = match tool.name {
+      "java" => "Java"
+      "node" => "Node.js"
+      _ => known.unwrap_or(tool.name)
     }
     guard headline && !seen.contains(name) else { continue }
     seen.push(name)
@@ -339,11 +343,19 @@ pub fn setting_words(notes : String) -> Map[String, String] {
 /// The tool entry the rules use for a package: the oldest exact version,
 /// else the oldest range. A directory holding several packages is judged by
 /// the one furthest behind.
-fn tool_for(profile : ProjectProfile, package : String) -> ProjectTool? {
+fn tool_for(
+  profile : ProjectProfile,
+  repository : String,
+  package : String,
+) -> ProjectTool? {
   let mut exact : (ProjectTool, Version)? = None
   let mut range : (ProjectTool, Version)? = None
   for tool in profile.tools {
-    guard tool_matches(tool.name, package) else { continue }
+    // A GitHub Action or a Terraform provider is named by its repository.
+    guard tool_matches(tool.name, package) ||
+      tool.name.to_lower() == repository.to_lower() else {
+      continue
+    }
     guard parse_version(tool.version) is Some(version) else { continue }
     let slot = if tool.exact { exact } else { range }
     // On a tie the tool named exactly like the package wins, so evidence
@@ -371,18 +383,57 @@ fn tool_for(profile : ProjectProfile, package : String) -> ProjectTool? {
 }
 
 ///|
-/// Whether a range such as "^11.0.0", "~11.4.0", or ">=10" allows
-/// `version`. A range with no upper bound allows every newer version.
+/// How many version numbers `text` writes: 1 for "v4" or "22", 2 for
+/// "~> 5.0", 3 for "11.4.0".
+fn written_parts(text : String) -> Int {
+  let mut parts = 0
+  let mut in_number = false
+  for character in text {
+    if character >= '0' && character <= '9' {
+      if !in_number {
+        parts += 1
+        in_number = true
+      }
+    } else if character == '.' && in_number {
+      in_number = false
+    } else if in_number {
+      break
+    }
+  }
+  parts
+}
+
+///|
+/// Whether a range such as "^11.0.0", "~11.4.0", ">=10", Terraform's
+/// "~> 5.0", or a version line such as "v4" or "22" allows `version`. A
+/// range with no upper bound allows every newer version.
 pub fn range_allows(range : String, lower : Version, version : Version) -> Bool {
-  let text = range.trim()
+  let text = range.trim().to_owned()
+  let same_major = version.major == lower.major
+  let same_minor = same_major && version.minor == lower.minor
   if version.compare_to(lower) < 0 {
     false
+  } else if text.has_prefix("~>") {
+    // Terraform: "~> 5.0" stays in 5, "~> 1.8.0" stays in 1.8.
+    if written_parts(text) >= 3 {
+      same_minor
+    } else {
+      same_major
+    }
   } else if text.has_prefix("^") {
-    version.major == lower.major
+    same_major
   } else if text.has_prefix("~") {
-    version.major == lower.major && version.minor == lower.minor
-  } else if text.has_prefix(">") || text.contains("x") || text.contains("*") {
+    same_minor
+  } else if text.has_prefix(">") || text.contains("*") {
     true
+  } else if text.contains("x") || written_parts(text) < 3 {
+    // A line: "22", "v4", or "4.x" is the newest 22 or 4; "4.1" or
+    // "4.1.x" the newest 4.1.
+    if written_parts(text) >= 2 {
+      same_minor
+    } else {
+      same_major
+    }
   } else {
     // An exact version written as a range allows only itself.
     version.compare_to(lower) == 0
@@ -429,7 +480,13 @@ pub fn release_relations(
   let label = package_label(package)
   let shown = tag_version(tag).unwrap_or(released.text())
   for profile in profiles {
-    guard tool_for(profile, package) is Some(tool) else { continue }
+    guard tool_for(profile, repository, package) is Some(tool) else { continue }
+    let label = if tool.name.to_lower() == repository.to_lower() &&
+      !known_package(tool.name) {
+      repository
+    } else {
+      label
+    }
     guard parse_version(tool.version) is Some(used) else { continue }
     let used_text = if tool.exact { used.text() } else { tool.version }
     let from = "\{tool.source} sets \{tool.name}: \{tool.version}"
@@ -453,12 +510,21 @@ pub fn release_relations(
           "\{shown} is in major line \{released.major}; the project is on \{used.major}",
         ],
       })
-    } else if order > 0 && tool.exact {
+    } else if order > 0 {
+      // Newer in the same major line: an exact version, or a range such as
+      // Terraform's "~> 1.10.0" that has to change to allow it.
       relations.push({
         project: profile.name,
         kind: NewerThanInUse,
         label: "\{label} \{used_text} → \{shown}",
-        evidence: [from, "\{shown} is newer than \{used.text()}"],
+        evidence: [
+          from,
+          if tool.exact {
+            "\{shown} is newer than \{used.text()}"
+          } else {
+            "\{used_text} does not allow \{shown}"
+          },
+        ],
       })
     } else {
       let label = if tool.exact {

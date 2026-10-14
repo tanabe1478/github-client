@@ -2,7 +2,7 @@
 /// Directories never searched for repositories.
 let skipped_directories : Array[String] = [
   "node_modules", ".git", "build", "dist", "out", "target", "vendor", "coverage",
-  ".gradle", ".next", ".tmp", ".cache",
+  ".gradle", ".next", ".tmp", ".cache", ".terraform",
 ]
 
 ///|
@@ -297,9 +297,17 @@ pub fn parse_files(
           settings.push({ key, file: relative, })
         }
       }
-      JavaVersionFile => {
+      VersionFile => {
         read.push(relative)
-        read_java_version_file(relative, source, tools)
+        read_version_file(relative, source, tools)
+      }
+      Workflow => {
+        read.push(relative)
+        read_workflow(relative, source, tools)
+      }
+      Terraform => {
+        read.push(relative)
+        read_terraform(relative, source, tools)
       }
       SpringConfig => {
         read.push(relative)
@@ -328,6 +336,7 @@ pub fn parse_files(
     .map(entry => entry.0)
     .to_array(),
     problem: problems.join(" "),
+    moved_to: "",
   }
 }
 

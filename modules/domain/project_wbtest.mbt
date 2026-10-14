@@ -21,6 +21,7 @@ fn web_profile() -> ProjectProfile {
     files: ["package.json", ".npmrc"],
     dependency_count: 2,
     managed: [],
+    moved_to: "",
     problem: "",
   }
 }
@@ -216,6 +217,7 @@ fn service_profile() -> ProjectProfile {
     files: ["gradle/libs.versions.toml"],
     dependency_count: 2,
     managed: [],
+    moved_to: "",
     problem: "",
   }
 }
@@ -364,4 +366,29 @@ test "Spring properties written as prose relate, with the keys under them" {
     "Spring Boot 3.4.2 → 3.4.3", "uses spring.threads.virtual.enabled in api/src/main/resources/application.yml",
     "uses spring.security.oauth2.resourceserver.jwt.* in api/src/main/resources/application.yml",
   ])
+}
+
+///|
+test "a newer release outside a range in the same major line is newer" {
+  let profile = {
+    ..service_profile(),
+    tools: [
+      {
+        name: "hashicorp/terraform",
+        version: "~> 1.10.0",
+        exact: false,
+        source: "terraform.tf required_version",
+      },
+    ],
+  }
+  let relations = release_relations("hashicorp/terraform", "v1.16.5", "", [
+    profile,
+  ])
+  assert_eq(relations[0].kind, NewerThanInUse)
+  assert_eq(relations[0].label, "Terraform ~> 1.10.0 → 1.16.5")
+  assert_eq(relations[0].evidence[1], "~> 1.10.0 does not allow 1.16.5")
+  let allowed = release_relations("hashicorp/terraform", "v1.10.4", "", [
+    profile,
+  ])
+  assert_eq(allowed[0].kind, InUse)
 }

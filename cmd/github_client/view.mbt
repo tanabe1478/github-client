@@ -132,6 +132,27 @@ fn projects_text(
         if profile.dependency_count > 0 {
           found.push("\{profile.dependency_count} dependencies")
         }
+        // Actions and Terraform providers are named by their repository.
+        let count_named = (matches : (@domain.ProjectTool) -> Bool) => {
+          let names : Array[String] = []
+          for tool in profile.tools {
+            if matches(tool) && !names.contains(tool.name) {
+              names.push(tool.name)
+            }
+          }
+          names.length()
+        }
+        let actions = count_named(tool => tool.source.has_suffix(" uses"))
+        if actions > 0 {
+          found.push("\{actions} GitHub Actions")
+        }
+        let providers = count_named(tool => {
+          tool.name.contains("/terraform-provider-")
+        })
+        if providers > 0 {
+          let noun = if providers == 1 { "provider" } else { "providers" }
+          found.push("\{providers} Terraform \{noun}")
+        }
         // Files that hold settings; the build files show as the versions
         // and dependencies above.
         for file in profile.files {
@@ -150,14 +171,21 @@ fn projects_text(
         }
         // "none": readable, but nothing this version reads, such as a Java
         // project.
-        let state = if profile.problem == "" && profile.files.is_empty() {
+        let state = if profile.problem == "" &&
+          profile.tools.is_empty() &&
+          profile.settings.is_empty() &&
+          profile.dependency_count == 0 {
           "none"
         } else {
           ""
         }
-        [name, safe_row_text(profile.problem), found.join("\u{1f}"), state].join(
-          "\t",
-        )
+        [
+          name,
+          safe_row_text(profile.problem),
+          found.join("\u{1f}"),
+          state,
+          profile.moved_to,
+        ].join("\t")
       }
       [] => [name, "", "", "reading"].join("\t")
     }
