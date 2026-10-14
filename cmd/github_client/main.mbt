@@ -944,9 +944,9 @@ async fn main {
 
   fn add_base_projects(raw : String) -> Unit {
     let input = raw.trim().to_owned()
-    if input == "" {
-      return
-    }
+    // An `if ... { return }` here makes moonc 0.10.14 fail an assertion in
+    // release builds; `guard` compiles.
+    guard input != "" else { return }
     let current = settings.base_repositories
     if @project_reader.is_directory(@project_reader.expand_home(input)) {
       match @project_reader.discover_repositories(input) {
