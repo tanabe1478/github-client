@@ -5,6 +5,7 @@ test "settings encode/decode roundtrip" {
     include_closed_mentions: false,
     mention_days: 14,
     base_repositories: [],
+    npm_mirrors: [],
   }
   guard decode(encode(settings)) is Ok(decoded) else {
     fail("encoded settings should decode")
@@ -71,4 +72,24 @@ test "base repositories round-trip, one per line" {
   assert_true(encoded.contains("base.repository = acme/storefront\n"))
   assert_eq(decode(encoded), Ok(settings))
   assert_true(decode("base.repository = not-a-repository") is Err(_))
+}
+
+///|
+test "npm mirrors round-trip without a trailing slash" {
+  let settings = {
+    ..default_settings(),
+    npm_mirrors: ["https://npm.acme.example"],
+  }
+  let encoded = encode(settings)
+  assert_true(
+    encoded.contains("npm.public_mirror = https://npm.acme.example\n"),
+  )
+  assert_eq(decode(encoded), Ok(settings))
+  assert_eq(
+    decode("npm.public_mirror = https://npm.acme.example/").map(settings => {
+      settings.npm_mirrors
+    }),
+    Ok(["https://npm.acme.example"]),
+  )
+  assert_true(decode("npm.public_mirror = npm.acme.example") is Err(_))
 }

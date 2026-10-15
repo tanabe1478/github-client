@@ -244,6 +244,7 @@ pub fn parse_files(
   let read : Array[String] = []
   let problems : Array[String] = []
   let mut package_name = ""
+  let mut npm_registry = ""
   for entry in files {
     let (relative, source) = entry
     let name = base_name(relative)
@@ -265,6 +266,10 @@ pub fn parse_files(
         }
       Npmrc => {
         read.push(relative)
+        match npm_default_registry(source) {
+          Some(url) if npm_registry == "" => npm_registry = url
+          _ => ()
+        }
         for key in npmrc_keys(source) {
           settings.push({ key, file: relative, })
         }
@@ -337,6 +342,9 @@ pub fn parse_files(
     .to_array(),
     problem: problems.join(" "),
     moved_to: "",
+    sources: [],
+    unreleased: [],
+    npm_registry,
   }
 }
 

@@ -864,6 +864,7 @@ pub async fn fetch_project_profile(
   repo_scopes : Map[String, String],
   owner_scopes : Map[String, String],
   repository : String,
+  npm_mirrors? : Array[String] = [],
 ) -> @domain.ProjectProfile {
   guard @domain.RepositoryRef::parse(repository) is Ok(reference) else {
     return {
@@ -938,6 +939,7 @@ pub async fn fetch_project_profile(
         )
     }
   }
+  profile = resolve_sources(token, profile, files, npm_mirrors)
   if errors.is_empty() {
     profile
   } else {
@@ -966,17 +968,215 @@ pub async fn fetch_project_profile(
 }
 
 ///|
+/// The GitHub repository of a Maven library, by Dependabot's rules
+/// (ADR 0007): its pom, then its parents. A Gradle build also looks on the
+/// Gradle Plugin Portal.
+async fn maven_source(
+  gradle : Bool,
+  group : String,
+  artifact : String,
+  version : String,
+) -> String? {
+  let repositories = if gradle {
+    [@github_api.MAVEN_CENTRAL, @github_api.GRADLE_PLUGIN_PORTAL]
+  } else {
+    [@github_api.MAVEN_CENTRAL]
+  }
+  let mut found : (String, String)? = None
+  for repository in repositories {
+    match @github_api.get_pom(repository, group, artifact, version) {
+      Ok(Some(pom)) => {
+        found = Some((repository, pom))
+        break
+      }
+      Ok(None) => ()
+      Err(error) => {
+        @github_api.log("base-project: pom \{group}:\{artifact}: \{error}")
+        return None
+      }
+    }
+  }
+  guard found is Some((repository, pom)) else { return None }
+  match @project_reader.pom_source(pom, artifact) {
+    Some(source) => return source
+    None => ()
+  }
+  // The first parent may be in any group; further ones only in the
+  // library's own group, such as AWS SDK's services and aws-sdk-java-pom.
+  let mut current = pom
+  for depth in 0..<5 {
+    guard @project_reader.pom_parent(current)
+      is Some((parent_group, parent_artifact, parent_version)) else {
+      return None
+    }
+    guard depth == 0 || parent_group == group else { return None }
+    let parent = match
+      @github_api.get_pom(
+        repository, parent_group, parent_artifact, parent_version,
+      ) {
+      Ok(Some(text)) => text
+      _ => return None
+    }
+    match @project_reader.pom_source(parent, artifact) {
+      Some(Some(source)) =>
+        return if @project_reader.ancestor_source_accepted(
+            group, artifact, parent_group, source,
+          ) {
+          Some(source)
+        } else {
+          None
+        }
+      Some(None) => return None
+      None => current = parent
+    }
+  }
+  None
+}
+
+///|
+/// The GitHub repository a registry names for one dependency.
+async fn lookup_source(
+  gradle : Bool,
+  lookup : @project_reader.PackageLookup,
+) -> String? {
+  match lookup {
+    Maven(group, artifact, version) =>
+      maven_source(gradle, group, artifact, version)
+    GradlePlugin(id, version) =>
+      match
+        @github_api.get_pom(
+          @github_api.GRADLE_PLUGIN_PORTAL,
+          id,
+          "\{id}.gradle.plugin",
+          version,
+        ) {
+        Ok(Some(marker)) =>
+          match @project_reader.plugin_marker_target(marker) {
+            Some((group, artifact, version)) =>
+              maven_source(true, group, artifact, version)
+            None => None
+          }
+        Ok(None) => None
+        Err(error) => {
+          @github_api.log("base-project: plugin \{id}: \{error}")
+          None
+        }
+      }
+    Npm(name) =>
+      match @github_api.get_npm_latest(name) {
+        Ok(Some(listing)) => @project_reader.npm_source(listing).unwrap_or(None)
+        Ok(None) => None
+        Err(error) => {
+          @github_api.log("base-project: npm \{name}: \{error}")
+          None
+        }
+      }
+  }
+}
+
+///|
+/// The profile with the GitHub repository of each dependency a registry
+/// names, and the repositories it depends on that publish no releases. A
+/// repository the registry names by an old name is followed to its new one.
+async fn resolve_sources(
+  token : String,
+  profile : @domain.ProjectProfile,
+  files : Array[(String, String)],
+  npm_mirrors : Array[String],
+) -> @domain.ProjectProfile {
+  let gradle = profile.files.any(file => {
+    file.has_suffix(".gradle") ||
+    file.has_suffix(".gradle.kts") ||
+    file.has_suffix(".versions.toml")
+  })
+  let lookups = @project_reader.package_lookups(profile, files, npm_mirrors~)
+  let found = @async.all(
+    lookups.map(lookup => async fn() { lookup_source(gradle, lookup) }),
+    max_concurrent=8,
+  )
+  let sources : Array[@domain.PackageSource] = []
+  for index, repository in found {
+    match repository {
+      Some(name) =>
+        sources.push({ name: lookups[index].tool_name(), repository: name, })
+      None => ()
+    }
+  }
+  let resolved = { ..profile, sources, }
+  let repositories = @domain.depended_repositories(resolved)
+  // (repository now, has releases); "" when GitHub has no such repository.
+  let checks = @async.all(
+    repositories.map(repository => {
+      async fn() {
+        guard @domain.RepositoryRef::parse(repository) is Ok(reference) else {
+          return (repository, true)
+        }
+        match
+          @github_api.has_releases(token, reference.owner(), reference.name()) {
+          Ok(released) => (repository, released)
+          Err(error) if error.contains("status 301") =>
+            match
+              @github_api.moved_repository(
+                token,
+                reference.owner(),
+                reference.name(),
+              ) {
+              Ok(Some(moved)) => (moved, true)
+              _ => (repository, true)
+            }
+          // A pom can name a repository that is private or gone, such as
+          // micrometer-metrics/micrometer-commercial.
+          Err(error) if @github_api.classify_failure(error) is NotFound =>
+            ("", false)
+          Err(error) => {
+            @github_api.log("base-project: releases of \{repository}: \{error}")
+            (repository, true)
+          }
+        }
+      }
+    }),
+    max_concurrent=8,
+  )
+  let unreleased : Array[String] = []
+  let renamed : Map[String, String] = Map([])
+  for index, check in checks {
+    let (name, released) = check
+    if name != repositories[index] {
+      renamed.set(repositories[index], name)
+    } else if !released {
+      unreleased.push(name)
+    }
+  }
+  let kept : Array[@domain.PackageSource] = []
+  for source in sources {
+    match renamed.get(source.repository) {
+      Some("") => ()
+      Some(name) => kept.push({ ..source, repository: name, })
+      None => kept.push(source)
+    }
+  }
+  { ..resolved, sources: kept, unreleased, }
+}
+
+///|
 /// Profiles for every base project, read concurrently, in the given order.
 pub async fn fetch_project_profiles(
   tokens : Map[String, String],
   repo_scopes : Map[String, String],
   owner_scopes : Map[String, String],
   repositories : Array[String],
+  npm_mirrors? : Array[String] = [],
 ) -> Array[@domain.ProjectProfile] {
   @async.all(
     repositories.map(repository => {
       async fn() {
-        fetch_project_profile(tokens, repo_scopes, owner_scopes, repository)
+        fetch_project_profile(
+          tokens,
+          repo_scopes,
+          owner_scopes,
+          repository,
+          npm_mirrors~,
+        )
       }
     }),
     max_concurrent=6,

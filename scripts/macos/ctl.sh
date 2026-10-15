@@ -31,6 +31,10 @@ commands:
   project-remove <owner/name>
                         remove a base project
   project-rescan        read every base project again
+  npm-mirror-add <url>  treat a base project's npm registry as a mirror of
+                        npm, so its packages are looked up on npm
+  npm-mirror-remove <url>
+                        stop treating it as a mirror
   suggest-watches       open "Watch what your base projects use"
   suggest-watch <owner/name,...|all>
                         watch suggested repositories for their releases
@@ -69,7 +73,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 case "$1" in
-  open|done|save|unsub|unsubscribe|nav|watch|unwatch|kind|repo|reason|expand|menu|project-add|project-remove|project-follow|suggest-watch|related-only|project|why)
+  open|done|save|unsub|unsubscribe|nav|watch|unwatch|kind|repo|reason|expand|menu|project-add|project-remove|project-follow|npm-mirror-add|npm-mirror-remove|suggest-watch|related-only|project|why)
     if [[ $# -lt 2 ]]; then
       echo "$1 requires an argument" >&2
       usage

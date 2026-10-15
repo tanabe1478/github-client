@@ -37,7 +37,37 @@ pub(all) struct ProjectProfile {
   problem : String
   /// owner/name the repository was renamed or moved to, or "".
   moved_to : String
+  /// The GitHub repository of each dependency whose registry entry names
+  /// one, such as zalando/logbook for org.zalando:logbook-spring-boot-starter.
+  sources : Array[PackageSource]
+  /// Repositories it depends on that publish no GitHub releases.
+  unreleased : Array[String]
+  /// The registry an .npmrc sends npm packages to, when it is not the public
+  /// one, such as a company proxy; "" otherwise. Its packages are looked up
+  /// on registry.npmjs.org only when it is set as a public mirror.
+  npm_registry : String
 } derive(Eq, Debug)
+
+///|
+/// Where a dependency's code lives, as its registry entry says: the pom's
+/// url or scm on Maven Central, or `repository` on npm.
+pub(all) struct PackageSource {
+  /// The tool name, such as "org.zalando:logbook-spring-boot-starter".
+  name : String
+  /// owner/name.
+  repository : String
+} derive(Eq, Debug)
+
+///|
+/// The GitHub repository a profile's registry lookups found for a tool.
+pub fn source_repository(profile : ProjectProfile, name : String) -> String? {
+  for source in profile.sources {
+    if source.name == name {
+      return Some(source.repository)
+    }
+  }
+  None
+}
 
 ///|
 pub(all) enum RelationKind {
@@ -351,9 +381,15 @@ fn tool_for(
   let mut exact : (ProjectTool, Version)? = None
   let mut range : (ProjectTool, Version)? = None
   for tool in profile.tools {
-    // A GitHub Action or a Terraform provider is named by its repository.
+    // A GitHub Action or a Terraform provider is named by its repository,
+    // and a library's registry entry can name it: io.sentry:sentry-logback
+    // comes from getsentry/sentry-java.
     guard tool_matches(tool.name, package) ||
-      tool.name.to_lower() == repository.to_lower() else {
+      tool.name.to_lower() == repository.to_lower() ||
+      (
+        source_repository(profile, tool.name) is Some(found) &&
+        found.to_lower() == repository.to_lower()
+      ) else {
       continue
     }
     guard parse_version(tool.version) is Some(version) else { continue }
@@ -600,6 +636,9 @@ pub(all) struct WatchCandidate {
   projects : Array[String]
   /// What each use reads, such as "acme/web: 4.4.0".
   uses : Array[String]
+  /// false when the repository publishes no GitHub releases, so watching
+  /// it brings nothing into Releases.
+  released : Bool
 } derive(Eq, Debug)
 
 ///|
@@ -626,8 +665,26 @@ pub fn tool_repository(tool : ProjectTool) -> String? {
 }
 
 ///|
-/// Repositories the base projects depend on and `watched` does not hold,
-/// the ones most projects use first.
+/// The repositories a profile depends on: those named by the tools
+/// themselves and those the registry lookups found.
+pub fn depended_repositories(profile : ProjectProfile) -> Array[String] {
+  let found : Array[String] = []
+  for tool in profile.tools {
+    let repository = match tool_repository(tool) {
+      Some(repository) => Some(repository)
+      None => source_repository(profile, tool.name)
+    }
+    match repository {
+      Some(name) if !found.contains(name) => found.push(name)
+      _ => ()
+    }
+  }
+  found
+}
+
+///|
+/// Repositories the base projects depend on and `watched` does not hold.
+/// Those with GitHub releases come first, then the ones most projects use.
 pub fn watch_candidates(
   profiles : Array[ProjectProfile],
   watched : Array[String],
@@ -636,26 +693,59 @@ pub fn watch_candidates(
   let found : Array[WatchCandidate] = []
   for profile in profiles {
     for tool in profile.tools {
-      guard tool_repository(tool) is Some(repository) else { continue }
+      // A library found through its registry names its package, since one
+      // repository can hold many, such as DefinitelyTyped's @types.
+      let (repository, named) = match tool_repository(tool) {
+        Some(repository) => (repository, false)
+        None =>
+          match source_repository(profile, tool.name) {
+            Some(repository) => (repository, true)
+            None => continue
+          }
+      }
       guard !watched_keys.contains(repository.to_lower()) else { continue }
-      let use_ = "\{profile.name}: \{tool.version}"
+      let use_ = if named {
+        "\{profile.name}: \{tool.name} \{tool.version}"
+      } else {
+        "\{profile.name}: \{tool.version}"
+      }
+      // The first package stands for the others at the same version, such
+      // as AWS SDK's service clients.
+      let same_version = (entry : WatchCandidate) => {
+        entry.uses.any(other => {
+          other.has_prefix("\{profile.name}: ") &&
+          other.has_suffix(" \{tool.version}")
+        })
+      }
       match found.search_by(entry => entry.repository == repository) {
         Some(index) => {
           let entry = found[index]
           if !entry.projects.contains(profile.name) {
             entry.projects.push(profile.name)
           }
-          if !entry.uses.contains(use_) {
+          if !entry.uses.contains(use_) && !(named && same_version(entry)) {
             entry.uses.push(use_)
           }
         }
         None =>
-          found.push({ repository, projects: [profile.name], uses: [use_], })
+          found.push({
+            repository,
+            projects: [profile.name],
+            uses: [use_],
+            released: !profiles.any(profile => {
+              profile.unreleased.contains(repository)
+            }),
+          })
       }
     }
   }
   found.sort_by((a, b) => {
-    let order = b.projects.length().compare(a.projects.length())
+    let released = b.released.compare(a.released)
+    let order = if released != 0 {
+      released
+    } else {
+      b.projects.length().compare(a.projects.length())
+    }
     if order != 0 {
       order
     } else {

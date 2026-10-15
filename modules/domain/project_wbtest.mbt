@@ -22,6 +22,9 @@ fn web_profile() -> ProjectProfile {
     dependency_count: 2,
     managed: [],
     moved_to: "",
+    sources: [],
+    unreleased: [],
+    npm_registry: "",
     problem: "",
   }
 }
@@ -218,6 +221,9 @@ fn service_profile() -> ProjectProfile {
     dependency_count: 2,
     managed: [],
     moved_to: "",
+    sources: [],
+    unreleased: [],
+    npm_registry: "",
     problem: "",
   }
 }
@@ -427,4 +433,82 @@ test "watch candidates are repositories known without a registry" {
   ])
   assert_eq(candidates[3].projects, ["acme/service"])
   assert_eq(candidates[3].uses, ["acme/service: 3.4.2"])
+}
+
+///|
+fn library_profile() -> ProjectProfile {
+  {
+    ..web_profile(),
+    name: "acme/api",
+    tools: [
+      {
+        name: "com.acme.logs:logs-spring-starter",
+        version: "4.1.0",
+        exact: true,
+        source: "gradle/libs.versions.toml libraries",
+      },
+      {
+        name: "com.acme.logs:logs-core",
+        version: "4.1.0",
+        exact: true,
+        source: "gradle/libs.versions.toml libraries",
+      },
+      {
+        name: "@types/widget",
+        version: "^2.0.0",
+        exact: false,
+        source: "package.json devDependencies",
+      },
+      {
+        name: "actions/checkout",
+        version: "v4",
+        exact: false,
+        source: ".github/workflows/ci.yml uses",
+      },
+    ],
+    sources: [
+      { name: "com.acme.logs:logs-spring-starter", repository: "acme/logbook", },
+      { name: "com.acme.logs:logs-core", repository: "acme/logbook", },
+      { name: "@types/widget", repository: "acme/typings", },
+    ],
+    unreleased: ["acme/typings"],
+  }
+}
+
+///|
+test "registry sources name the repositories of libraries" {
+  assert_eq(depended_repositories(library_profile()), [
+    "acme/logbook", "acme/typings", "actions/checkout",
+  ])
+  let candidates = watch_candidates([library_profile()], [])
+  // A repository without releases goes last, whatever uses it.
+  assert_eq(candidates.map(entry => (entry.repository, entry.released)), [
+    ("acme/logbook", true),
+    ("actions/checkout", true),
+    ("acme/typings", false),
+  ])
+  // Two libraries of one repository at one version make one use, named by
+  // the first.
+  assert_eq(candidates[0].uses, [
+    "acme/api: com.acme.logs:logs-spring-starter 4.1.0",
+  ])
+  assert_eq(candidates[1].uses, ["acme/api: v4"])
+}
+
+///|
+test "a release relates through the library's registry source" {
+  // acme/logbook's tags do not name any of the project's libraries.
+  let relations = release_relations("acme/logbook", "4.2.0", "", [
+    library_profile(),
+  ])
+  assert_eq(relations.length(), 1)
+  assert_eq(relations[0].kind, NewerThanInUse)
+  assert_eq(
+    relations[0].evidence[0],
+    "gradle/libs.versions.toml libraries sets com.acme.logs:logs-spring-starter: 4.1.0",
+  )
+  assert_eq(
+    release_relations("acme/logbook", "4.2.0", "", [web_profile()]).length(),
+    0,
+  )
 }

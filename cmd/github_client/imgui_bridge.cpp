@@ -1519,6 +1519,8 @@ static int gc_render_settings(const GcFrame& frame, float width) {
       const bool reading = gc_field(project, 3) == "reading";
       const bool nothing = gc_field(project, 3) == "none";
       const std::string moved_to = gc_field(project, 4);
+      const std::string npm_registry = gc_field(project, 5);
+      const bool npm_mirror = gc_field(project, 6) == "1";
       const float y = pos.y + bp_head + k * bp_row;
       if (k > 0) draw->AddLine(ImVec2(pos.x + 1.0f, y), ImVec2(pos.x + card_w - 1.0f, y), GC_BORDER_MUTED);
       const ImVec2 icon_box(pos.x + 20.0f, y + 14.0f);
@@ -1543,6 +1545,28 @@ static int gc_render_settings(const GcFrame& frame, float width) {
       } else if (nothing) {
         gc_text_ellipsis(gc_font_regular, 12.0f, ImVec2(pos.x + 64.0f, status_y), buttons_x - 12.0f, GC_MUTED,
                          "Nothing this app reads was found (npm, Gradle, Maven, GitHub Actions, Terraform), so no release is matched to it.");
+      } else if (!npm_registry.empty()) {
+        // An .npmrc registry that is not npm's: its package names are sent to
+        // npm only once it is set as a mirror (ADR 0007).
+        std::string host = npm_registry;
+        const size_t scheme = host.find("://");
+        if (scheme != std::string::npos) host = host.substr(scheme + 3);
+        const char* button = npm_mirror ? "Stop" : "It mirrors npm";
+        const float button_w = gc_button_width(button, GC_ICON_NONE, 22.0f);
+        const std::string note = npm_mirror
+            ? "Read from GitHub · npm packages from " + host + " are looked up on npm"
+            : "Read from GitHub · npm packages from " + host + " are not looked up";
+        gc_text_ellipsis(gc_font_regular, 12.0f, ImVec2(pos.x + 64.0f, status_y), buttons_x - 20.0f - button_w, GC_MUTED, note);
+        const float note_w = ImMin(gc_text_size(gc_font_regular, 12.0f, note).x, buttons_x - 20.0f - button_w - (pos.x + 64.0f));
+        ImGui::PushID(name.c_str());
+        ImGui::SetCursorScreenPos(ImVec2(pos.x + 64.0f + note_w + 8.0f, status_y - 4.0f));
+        if (gc_button("##base-project.npm-mirror", button, GC_BUTTON_DEFAULT, GC_ICON_NONE, false, button_w, 22.0f)) {
+          gc_selected_key = npm_registry; action = npm_mirror ? 43 : 42;
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::SetTooltip(npm_mirror ? "Stop sending package names from %s to npm" : "%s serves the public npm packages: look them up on registry.npmjs.org", host.c_str());
+        }
+        ImGui::PopID();
       } else {
         gc_text(draw, gc_font_regular, 12.0f, ImVec2(pos.x + 64.0f, status_y), GC_MUTED, "Read from GitHub");
       }
@@ -2068,7 +2092,7 @@ static int gc_render_suggest_dialog() {
     gc_pop_font();
     gc_font(gc_font_regular, 13.0f);
     ImGui::PushStyleColor(ImGuiCol_Text, GC_MUTED);
-    ImGui::TextWrapped("These repositories are GitHub Actions, Terraform providers, and tools your base projects use. Watching one brings in its releases only, labeled for each project.");
+    ImGui::TextWrapped("These repositories hold what your base projects depend on: libraries, GitHub Actions, Terraform providers, and tools. Watching one brings in its releases only, labeled for each project. A repository without GitHub releases has nothing to bring in.");
     ImGui::PopStyleColor();
     ImGui::Dummy(ImVec2(1.0f, 4.0f));
     int checked = 0;
@@ -2091,6 +2115,8 @@ static int gc_render_suggest_dialog() {
           uses += use;
         }
       }
+      // A repository that only pushes tags, such as DefinitelyTyped.
+      if (parts.size() > 2 && parts[2] == "0") uses = "No GitHub releases · " + uses;
       ImGui::PushID(static_cast<int>(k));
       const ImVec2 at = ImGui::GetCursorScreenPos();
       bool on = gc_suggest_checked[k];

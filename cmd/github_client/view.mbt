@@ -118,11 +118,14 @@ fn relations_text(relations : Array[@domain.Relation]) -> String {
 }
 
 ///|
-/// One line per base project: name, problem, and what was found, the last
-/// joined by U+001F. Projects not read yet show as "Reading…".
+/// One line per base project: name, problem, what was found (joined by
+/// U+001F), state, the name it moved to, the npm registry it uses when that
+/// is not the public one, and whether that registry is set as a mirror.
+/// Projects not read yet show as "Reading…".
 fn projects_text(
   profiles : Array[@domain.ProjectProfile],
   repositories : Array[String],
+  npm_mirrors : Array[String],
 ) -> String {
   repositories
   .map(name => {
@@ -185,6 +188,8 @@ fn projects_text(
           found.join("\u{1f}"),
           state,
           profile.moved_to,
+          profile.npm_registry,
+          flag(npm_mirrors.contains(profile.npm_registry)),
         ].join("\t")
       }
       [] => [name, "", "", "reading"].join("\t")

@@ -291,12 +291,14 @@ async fn Session::fetch_personal(
 async fn Session::fetch_profiles(
   self : Session,
 ) -> Array[@domain.ProjectProfile] {
-  let repositories = load_settings_or_default().base_repositories
+  let settings = load_settings_or_default()
+  let repositories = settings.base_repositories
   let profiles = @activity_sync.fetch_project_profiles(
     self.tokens,
     self.repo_scopes,
     self.owner_scopes,
     repositories,
+    npm_mirrors=settings.npm_mirrors,
   )
   let retry = profiles.any(profile => {
     profile.problem.has_prefix("The token can't") ||
@@ -310,6 +312,7 @@ async fn Session::fetch_profiles(
       self.repo_scopes,
       self.owner_scopes,
       repositories,
+      npm_mirrors=settings.npm_mirrors,
     )
   }
   profiles
@@ -675,6 +678,7 @@ async fn run(invocation : Invocation) -> Int {
               "repository": candidate.repository.to_json(),
               "projects": candidate.projects.to_json(),
               "uses": candidate.uses.to_json(),
+              "released": candidate.released.to_json(),
             }
             json
           })
@@ -686,12 +690,20 @@ async fn run(invocation : Invocation) -> Int {
           println("Every repository the base projects depend on is watched.")
         }
         for candidate in candidates {
-          println("\{candidate.repository}  (\{candidate.uses.join(", ")})")
+          let note = if candidate.released {
+            ""
+          } else {
+            "  no GitHub releases"
+          }
+          println(
+            "\{candidate.repository}  (\{candidate.uses.join(", ")})\{note}",
+          )
         }
       }
       0
     }
     "projects" => {
+      let settings = load_settings_or_default()
       let (session, _) = load_session()
       let profiles = session.fetch_profiles()
       if invocation.json {
@@ -725,6 +737,17 @@ async fn run(invocation : Invocation) -> Int {
               "dependency_count": profile.dependency_count.to_json(),
               "managed": profile.managed.to_json(),
               "moved_to": profile.moved_to.to_json(),
+              "sources": profile.sources
+              .map(source => {
+                let json : Json = {
+                  "name": source.name.to_json(),
+                  "repository": source.repository.to_json(),
+                }
+                json
+              })
+              .to_json(),
+              "unreleased": profile.unreleased.to_json(),
+              "npm_registry": profile.npm_registry.to_json(),
               "problem": profile.problem.to_json(),
             }
             json
@@ -754,6 +777,12 @@ async fn run(invocation : Invocation) -> Int {
           }
           for headline in @domain.headline_tools(profile) {
             println("  \{headline}")
+          }
+          if profile.npm_registry != "" &&
+            !settings.npm_mirrors.contains(profile.npm_registry) {
+            println(
+              "  npm packages come from \{profile.npm_registry}; to look up their repositories: ghclient npm-mirror-add \{profile.npm_registry}",
+            )
           }
           println(
             "  \{profile.dependency_count} dependencies · \{profile.settings.length()} settings in \{setting_files(profile)} files · \{profile.files.length()} files read",
@@ -823,6 +852,37 @@ async fn run(invocation : Invocation) -> Int {
           ..settings,
           base_repositories: repositories,
         }) {
+        Ok(_) => print_results(invocation, results)
+        Err(error) => {
+          print_error("could not save settings: \{error}")
+          1
+        }
+      }
+    }
+    "npm-mirror-add" | "npm-mirror-remove" => {
+      let settings = load_settings_or_default()
+      let mirrors = settings.npm_mirrors.copy()
+      let results : Array[(String, Result[String, String])] = []
+      for argument in invocation.arguments {
+        let url = @project_reader.registry_key(argument)
+        if !url.has_prefix("https://") && !url.has_prefix("http://") {
+          results.push((argument, Err("not a URL")))
+        } else if invocation.command == "npm-mirror-remove" {
+          if mirrors.contains(url) {
+            mirrors.retain(mirror => mirror != url)
+            results.push((url, Ok("removed")))
+          } else {
+            results.push((url, Err("not an npm mirror")))
+          }
+        } else if mirrors.contains(url) {
+          results.push((url, Ok("already an npm mirror")))
+        } else {
+          mirrors.push(url)
+          results.push((url, Ok("added")))
+        }
+      }
+      match
+        @settings_store.save_default({ ..settings, npm_mirrors: mirrors, }) {
         Ok(_) => print_results(invocation, results)
         Err(error) => {
           print_error("could not save settings: \{error}")

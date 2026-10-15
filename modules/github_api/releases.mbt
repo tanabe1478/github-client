@@ -233,3 +233,31 @@ pub async fn moved_repository(
     Err(error) => Err(error)
   }
 }
+
+///|
+/// Whether a repository has published releases, by repository. Checked
+/// once per run.
+let released_cache : Map[String, Bool] = Map([])
+
+///|
+/// Whether a repository publishes GitHub releases. A repository that only
+/// pushes tags, such as DefinitelyTyped, has none.
+pub async fn has_releases(
+  token : String,
+  owner : String,
+  name : String,
+) -> Result[Bool, String] {
+  let key = "\{owner}/\{name}".to_lower()
+  match released_cache.get(key) {
+    Some(released) => return Ok(released)
+    None => ()
+  }
+  match get_json(token, "/repos/\{owner}/\{name}/releases?per_page=1") {
+    Ok(json) => {
+      let released = json_array_length(json) > 0
+      released_cache.set(key, released)
+      Ok(released)
+    }
+    Err(error) => Err(error)
+  }
+}

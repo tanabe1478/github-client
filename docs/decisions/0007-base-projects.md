@@ -26,7 +26,7 @@ ADR 0006でリリースを受け取れるようになった。しかし、どの
 
 npm、pnpm、Gradle、Maven、GitHub Actions、Terraformを対象にする。既定branchのファイル一覧を1回取り（Gitのtree API）、下のファイルを深さを問わず読む。`node_modules`、`build`、`target`、`.terraform`などの生成物と、`test`、`fixtures`、`examples`などのテスト用のディレクトリは除く。浅いものから最大150ファイルまでにする。
 
-エコシステムは、依存からGitHubのリポジトリが確実に分かるものを優先する。このアプリはWatchしたGitHubのリポジトリのリリースを結び付けるためである。GitHub Actions（`uses: owner/repo@v4`）とTerraformのprovider（`hashicorp/aws`は`hashicorp/terraform-provider-aws`）は、外部のregistryに問い合わせずにリポジトリが決まる。Dockerのimageとpipは、リポジトリとの対応に対応表か外部への問い合わせが要るため、後の段階にする。
+エコシステムは、依存からGitHubのリポジトリが分かるものを優先する。このアプリはWatchしたGitHubのリポジトリのリリースを結び付けるためである。GitHub Actions（`uses: owner/repo@v4`）とTerraformのprovider（`hashicorp/aws`は`hashicorp/terraform-provider-aws`）は、外部のregistryに問い合わせずにリポジトリが決まる。npmとMavenは公開registryから引く（「依存のリポジトリの解決」）。Dockerのimageとpipは、リポジトリとの対応に対応表か外部への問い合わせが要るため、後の段階にする。
 
 | ファイル | 読み取る内容 |
 |---|---|
@@ -62,15 +62,26 @@ GitHubで改名や移動されたリポジトリは、旧名に301が返る。�
 
 lockfile（`pnpm-lock.yaml`、`package-lock.json`、`gradle.lockfile`）、SBOM、ほかのエコシステムは後の段階にする。GitHubの依存グラフ（SBOM API）は、GradleのプロジェクトではGitHub Actionsしか載っていないことがあり（dependency submissionが要る）、ここでは使わない。
 
+### 依存のリポジトリの解決
+
+npmとMavenの依存は、名前からはGitHubのリポジトリが分からない。Dependabotと同じく、公開registryにあるパッケージの情報から引く。規則はdependabot-coreの`maven/shared/shared_metadata_finder.rb`と`npm_and_yarn/metadata_finder.rb`に合わせる。
+
+- Maven: 依存のpomを、`<url>`、`<scm><url>`、`<issueManagement><url>`の順に見て、最初にソースのhost（GitHub、GitLab、Bitbucket）を指すものを使う。なければ、pomのどこかにあるGitHubのURLのうち、リポジトリ名がartifactIdで終わるものを使う。`${scm.github.url}`のようなプロパティは、そのpomのpropertiesとフィールドで展開する。
+- 見つからなければ親のpomをたどる。Dependabotは1段だけたどり、見つかったリポジトリの名前がartifactIdで終わるときだけ採用する。ここではそれに加えて、依存と同じgroupの親は何段でもたどり、そのリポジトリを採用する（5段まで）。AWS SDK（`software.amazon.awssdk:dynamodb`→`services`→`aws-sdk-java-pom`）とFlywayは、Dependabotでもリポジトリが見つからず、PRにリンクがないためである。groupの違う親（会社共通の親pomなど）は、別のプロジェクトのリポジトリを指しうるので、名前の一致がなければ採用しない。
+- pomはMaven Centralから取る。Gradleのプロジェクトは、Maven Centralにないものを Gradle Plugin Portal（`plugins.gradle.org/m2`）から取る。Gradleのプラグインは、markerのpom（`<id>.gradle.plugin`）が指すライブラリから引く。
+- npm: `registry.npmjs.org/<name>/latest`の`repository`、`homepage`、`bugs`の順に見る。`owner/name`と`github:owner/name`の短い書き方も読む。Dependabotは最新版になければ古い版も見るが、パッケージの全版の情報は大きいため、最新版だけにする。
+- 送るのは公開パッケージの名前と版だけで、tokenとプロジェクトの内容は送らない。プロジェクト自身のgroup（Gradleの`group = "..."`、pomの`<groupId>`）は送らない。npmは、`.npmrc`がほかのregistryに送るパッケージ（`@scope:registry=`と`registry=`）を送らない。会社の中継（`npm.acme.example`など）は公開npmと同じパッケージを返すが、アプリからは中継か非公開のregistryかを区別できない。利用者が`settings.txt`の`npm.public_mirror`で中継と指定したregistryのパッケージだけをnpmjsに問い合わせる。Settingsのカードの「It mirrors npm」と`ghclient npm-mirror-add`からも指定できる。
+- リポジトリを引いたら、GitHubのリリースがあるかを1件だけ取って確かめる（`/releases?per_page=1`）。DefinitelyTypedやApacheのcommonsのように、タグだけでリリースのないリポジトリは、Watchしても何も届かない。pomが見つからないリポジトリ（非公開か削除済み）を指すものは捨てる。改名されたものは新しい名前にする。
+- 結果はアプリの実行中だけ保つ。公開されたpomと版の情報は変わらない。
+
 ### 依存するリポジトリのWatch
 
 ベースプロジェクトを追加して読み終えたら、まだWatchしていない依存先のリポジトリを「Watch what your base projects use」で一覧にし、選んだものをWatchできるようにする。SettingsのBase projectsのカードの「Suggest watches」からも開ける。
 
-- 候補は外部に問い合わせずにリポジトリが分かるものだけにする。GitHub Actions、Terraformのprovider、Terraform本体、既知の対応表のパッケージ（pnpm、npm、Node.js、yarn、Spring Boot、Spring Framework、Gradle）。
-- npmとMavenの一般の依存は、registryに依存の名前を送らないとリポジトリが分からないため、候補にしない（段階4）。
-- 使っているプロジェクトの多い順に並べ、プロジェクトごとの版を添える。最初はどれも選ばない。数が多く、選ばずにWatchすると通知が増えるためである。
+- 候補は、GitHub Actions、Terraformのprovider、Terraform本体、既知の対応表のパッケージ（pnpm、npm、Node.js、yarn、Spring Boot、Spring Framework、Gradle）と、registryからリポジトリが分かったnpmとMavenの依存にする。1つのリポジトリが複数の依存を出すとき（AWS SDKのservice clientなど）は1件にまとめる。
+- リリースのあるものを先に、使っているプロジェクトの多い順に並べ、プロジェクトごとの版を添える。registryで分かった依存は、パッケージ名も添える（DefinitelyTypedは多くの`@types`を出すため）。リリースのないものは最後に「No GitHub releases」と示す。最初はどれも選ばない。数が多く、選ばずにWatchすると通知が増えるためである。
 - Watchしたリポジトリはリリースだけを取り込む（Pull requests、Issues、For youはオフ）。1回の取得でまとめて読む。
-- `ghclient watch-candidates`が同じ候補を出す。AIエージェントは`ghclient watch <owner/name> --kinds releases`でWatchする。
+- `ghclient watch-candidates`が同じ候補を出す（`released`でリリースの有無）。AIエージェントは`ghclient watch <owner/name> --kinds releases`でWatchする。
 
 ### 関連の判定
 
@@ -88,7 +99,7 @@ lockfile（`pnpm-lock.yaml`、`package-lock.json`、`gradle.lockfile`）、SBOM�
 
 セキュリティ勧告（使っている版が影響範囲に入る）は、使うAPIを確かめてから後の段階で足す。
 
-リリースとパッケージの対応は、まずWatch中のリポジトリ名とパッケージ名の既知の対応（`pnpm/pnpm`→`pnpm`、`npm/cli`→`npm`、`spring-projects/spring-boot`→`org.springframework.boot`、`gradle/gradle`→`gradle`）から始める。Mavenのgroupに対応するものは、そのidのプラグインとgroupのライブラリすべてに一致する（Spring Bootのプラグインと`spring-boot-starter-*`）。対応表にないリポジトリは、リポジトリ名と同じパッケージ名、またはartifact名に一致させる。npm registryの`repository`欄での解決は後の段階にする。ラベルの版はタグのとおりに出す（`4.2.0-M2`）。
+リリースとパッケージの対応は、まずWatch中のリポジトリ名とパッケージ名の既知の対応（`pnpm/pnpm`→`pnpm`、`npm/cli`→`npm`、`spring-projects/spring-boot`→`org.springframework.boot`、`gradle/gradle`→`gradle`）から始める。Mavenのgroupに対応するものは、そのidのプラグインとgroupのライブラリすべてに一致する（Spring Bootのプラグインと`spring-boot-starter-*`）。対応表にないリポジトリは、リポジトリ名と同じパッケージ名、またはartifact名に一致させる。registryで引いたリポジトリが同じ依存にも一致させる（`getsentry/sentry-java`のリリースと`io.sentry:sentry-logback`）。ラベルの版はタグのとおりに出す（`4.2.0-M2`）。
 
 ### AIによる判断
 
@@ -110,10 +121,10 @@ AIにはJev、Claudeなどを選べるようにし、アプリとファイルの
 
 ## 段階
 
-1. リポジトリのベースプロジェクトとディレクトリからの一括登録、改名への追従、依存するリポジトリのWatchの候補、npm、pnpm、Gradle、Maven、GitHub Actions、Terraformのファイル（下位のディレクトリを含む）とJavaとNode.jsの版とSpringの設定の読み取り、BOMによる版の解決、決定論的な規則、Releasesでの表示と絞り込み、Settingsのカード。
+1. リポジトリのベースプロジェクトとディレクトリからの一括登録、改名への追従、依存するリポジトリのWatchの候補（registryでのリポジトリの解決を含む）、npm、pnpm、Gradle、Maven、GitHub Actions、Terraformのファイル（下位のディレクトリを含む）とJavaとNode.jsの版とSpringの設定の読み取り、BOMによる版の解決、決定論的な規則、Releasesでの表示と絞り込み、Settingsのカード。
 2. AIの判断の記録（`ghclient`のコマンド）、根拠の確認、表示。
 3. lockfileとSBOMの読み取り（推移的な依存）。
-4. セキュリティ勧告、npm registryとMaven Centralでのパッケージとリポジトリの対応、Terraformのmodule、Dockerのimageとpipなどほかのエコシステム。
+4. セキュリティ勧告、Terraformのmodule、Dockerのimageとpipなどほかのエコシステム。
 
 ## 検討した案
 
@@ -122,6 +133,10 @@ AIにはJev、Claudeなどを選べるようにし、アプリとファイルの
 - ベースプロジェクトを1つに限る: 利用者は複数のプロジェクトを持つ。複数にし、ラベルにプロジェクト名を出す。
 - GitHubの依存グラフ（SBOM API）で依存を得る: Dependabotと同じ情報で、推移的な依存も入る。しかしGradleのプロジェクトでは、dependency submissionを設定していないとGitHub Actionsしか載らなかった。build fileを読む方式にし、SBOMは段階3で併用を考える。
 - BOMをSpring BootのGitHubのリポジトリ（タグのbuild script）から読む: 外部のhostが増えないが、Gradleで書かれた版の定義を解析する必要があり、書き方が版ごとに変わる。公開されたpomの方が安定しているため、Maven Centralから読む。
+- 依存のリポジトリをDependabotのPRの本文から拾う（「Bumps [x](https://github.com/...)」）: registryに問い合わせずに済むが、ベースプロジェクトのPRを読む権限が別に要り、更新のあった依存しか分からない。AWS SDKのようにリンクのないPRもある。不採用。
+- 依存のリポジトリをdeps.dev（Googleの依存の情報サービス）で引く: npmとMavenを1つのAPIで引けるが、送り先がパッケージの公開registryではなくGoogleになる。不採用。
+- Dependabotの規則のとおり、親のpomを1段だけたどる: AWS SDKとFlywayのリポジトリが見つからない。同じgroupの親に限って何段でもたどる。
+- `.npmrc`の`registry=`の上書きは、すべて公開npmの中継とみなす: 設定が要らないが、既定のregistryに非公開のパッケージを置いている場合にその名前がnpmjsに送られる。利用者が中継と指定したものだけにする。
 - ディレクトリをベースプロジェクトとして直接読む: 外部に何も送らずに済むが、端末ごとに結果が変わり、ラベルの名前もリポジトリと結びつかない。一度は設計したが、利用者の判断でリポジトリ指定を基本にし、ディレクトリはリポジトリを見つける入口だけにした。
 
 ## Consequences
@@ -136,6 +151,6 @@ AIにはJev、Claudeなどを選べるようにし、アプリとファイルの
 - lockfileを読まないため、推移的な依存は判定できない。BOMがimportするBOMの中（`jackson-bom`が決めるJacksonの版など）もたどらない。
 - push前の変更は判定に入らない。
 - tokenにContentsの読み取り権限を足す必要がある。
-- ベースプロジェクトごとに、読み直すたびにファイル一覧と、読むファイルの数だけrequestが要る（ETagで変化がなければ304）。BOMの分だけMaven Centralへのrequestが増える。
+- ベースプロジェクトごとに、読み直すたびにファイル一覧と、読むファイルの数だけrequestが要る（ETagで変化がなければ304）。BOMの分だけMaven Centralへのrequestが増える。依存のリポジトリの解決で、依存の数だけMaven Central、Gradle Plugin Portal、npm registryへのrequestと、依存先のリポジトリの数だけGitHubへのrequestが増える（実行中は結果を保つ）。
 - AIの判断を出すには、AIエージェントを別に動かす必要がある。
 - プロジェクトが多いと、行が縦に長くなる。

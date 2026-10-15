@@ -55,6 +55,10 @@ let usage : String =
   #|  watch-candidates         repositories the base projects depend on and
   #|                           you do not watch; watch them with
   #|                           watch <owner/name> --kinds releases
+  #|  npm-mirror-add <url>...  treat an npm registry as a mirror of the public
+  #|                           one, so packages a base project gets from it
+  #|                           are looked up on registry.npmjs.org
+  #|  npm-mirror-remove <url>...
   #|
   #|Options:
   #|  --json   print JSON on stdout
@@ -71,14 +75,14 @@ let usage : String =
 let commands : Array[String] = [
   "inbox", "for-you", "releases", "saved", "done", "undone", "save", "unsave", "mute",
   "unmute", "repos", "watch", "unwatch", "accounts", "projects", "project-add", "project-remove",
-  "watch-candidates", "help",
+  "watch-candidates", "npm-mirror-add", "npm-mirror-remove", "help",
 ]
 
 ///|
 /// Commands that act on one or more arguments.
 let commands_with_arguments : Array[String] = [
   "done", "undone", "save", "unsave", "mute", "unmute", "watch", "unwatch", "project-add",
-  "project-remove",
+  "project-remove", "npm-mirror-add", "npm-mirror-remove",
 ]
 
 ///|

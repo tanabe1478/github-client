@@ -12,6 +12,10 @@ pub(all) struct Settings {
   /// Base projects, as owner/name. Releases are matched against what they
   /// use (ADR 0007).
   base_repositories : Array[String]
+  /// npm registries that serve the public npm packages, such as a company
+  /// proxy. Packages a base project gets from one are looked up on
+  /// registry.npmjs.org for their repositories (ADR 0007).
+  npm_mirrors : Array[String]
 } derive(Eq, Debug)
 
 ///|
@@ -21,6 +25,7 @@ pub fn default_settings() -> Settings {
     include_closed_mentions: false,
     mention_days: 30,
     base_repositories: [],
+    npm_mirrors: [],
   }
 }
 
@@ -57,6 +62,9 @@ pub fn encode(settings : Settings) -> String {
     ..settings.base_repositories.map(repository => {
       "base.repository = \{repository}"
     }),
+    "",
+    "# npm registries that mirror the public registry, one URL per line. A base project's packages from one of them are looked up on registry.npmjs.org to find their GitHub repositories; packages from any other registry are never sent there.",
+    ..settings.npm_mirrors.map(url => "npm.public_mirror = \{url}"),
   ].join("\n") +
   "\n"
 }
@@ -126,6 +134,15 @@ pub fn decode(source : String) -> Result[Settings, String] {
             ..settings,
             base_repositories: [..settings.base_repositories, value],
           }
+        }
+      }
+      "npm.public_mirror" => {
+        guard value.has_prefix("https://") || value.has_prefix("http://") else {
+          return Err("npm.public_mirror at line \{number} must be a URL")
+        }
+        let url = value.trim_end(chars="/").to_owned()
+        if !settings.npm_mirrors.contains(url) {
+          settings = { ..settings, npm_mirrors: [..settings.npm_mirrors, url], }
         }
       }
       _ => return Err("unknown setting \"\{key}\" at line \{number}")

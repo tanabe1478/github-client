@@ -840,7 +840,11 @@ async fn main {
     }
     loading_detail = "Base projects"
     let next = @activity_sync.fetch_project_profiles(
-      saved_tokens, repo_scopes, owner_scopes, repositories,
+      saved_tokens,
+      repo_scopes,
+      owner_scopes,
+      repositories,
+      npm_mirrors=settings.npm_mirrors,
     )
     if generation != active_generation {
       return
@@ -852,6 +856,24 @@ async fn main {
   fn queue_base_projects() -> Unit {
     if !saved_tokens.is_empty() && !pending_jobs.any(job => job is BaseProjects) {
       pending_jobs.push(BaseProjects)
+    }
+  }
+
+  // Saves the npm mirrors and reads the base projects again.
+  fn save_npm_mirrors(next : Array[String]) -> Bool {
+    let updated = { ..settings, npm_mirrors: next, }
+    match @settings_store.save_default(updated) {
+      Ok(_) => {
+        settings = updated
+        remember_files()
+        queue_base_projects()
+        true
+      }
+      Err(error) => {
+        notify("Couldn't save settings.", None)
+        println("settings-store: save failed: \{error}")
+        false
+      }
     }
   }
 
@@ -900,7 +922,7 @@ async fn main {
     github_client_imgui_open_watch_suggestions(
       candidates
       .map(candidate => {
-        "\{candidate.repository}\t\{candidate.uses.map(safe_row_text).join("\u{1f}")}"
+        "\{candidate.repository}\t\{candidate.uses.map(safe_row_text).join("\u{1f}")}\t\{flag(candidate.released)}"
       })
       .join("\n"),
     )
@@ -1415,10 +1437,12 @@ async fn main {
                 let mentions_changed = {
                     ..next,
                     base_repositories: settings.base_repositories,
+                    npm_mirrors: settings.npm_mirrors,
                   } !=
                   settings
                 let projects_changed = next.base_repositories !=
-                  settings.base_repositories
+                  settings.base_repositories ||
+                  next.npm_mirrors != settings.npm_mirrors
                 settings = next
                 if mentions_changed && !saved_tokens.is_empty() {
                   queue_mention_settings()
@@ -1892,7 +1916,11 @@ async fn main {
           [..review_requests, ..kept_review_requests],
         ),
         credentials_text(credential_problems),
-        projects_text(profiles, settings.base_repositories),
+        projects_text(
+          profiles,
+          settings.base_repositories,
+          settings.npm_mirrors,
+        ),
         banners_text(banners),
         loading,
         "\{snack_seq}\t\{safe_row_text(snack_message)}\t\{flag(undo_op is Some(_))}",
@@ -2235,6 +2263,27 @@ async fn main {
         38 => {
           queue_base_projects()
           println("ui-action: base-project.rescan")
+        }
+        // An npm registry a base project uses mirrors the public one, or
+        // no longer counts as one.
+        42 => {
+          let url = @project_reader.registry_key(github_client_imgui_take_key())
+          if url != "" &&
+            !settings.npm_mirrors.contains(url) &&
+            save_npm_mirrors([..settings.npm_mirrors, url]) {
+            notify("Looking up npm packages from \{url} on npm.", None)
+            println("ui-action: npm-mirror.add \{url}")
+          }
+        }
+        43 => {
+          let url = @project_reader.registry_key(github_client_imgui_take_key())
+          if settings.npm_mirrors.contains(url) &&
+            save_npm_mirrors(
+              settings.npm_mirrors.filter(mirror => mirror != url),
+            ) {
+            notify("No longer sending npm package names from \{url}.", None)
+            println("ui-action: npm-mirror.remove \{url}")
+          }
         }
         // The control file's auto-refresh: the same job the timer starts,
         // which posts notifications.

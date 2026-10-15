@@ -120,6 +120,10 @@ fn poll_control_commands(
       "project-remove" if argument != "" =>
         queue.push({ ..control_command(37), key: argument, })
       "project-rescan" => queue.push(control_command(38))
+      "npm-mirror-add" if argument != "" =>
+        queue.push({ ..control_command(42), key: argument, })
+      "npm-mirror-remove" if argument != "" =>
+        queue.push({ ..control_command(43), key: argument, })
       "suggest-watches" => queue.push(control_command(41))
       "suggest-watch" if argument != "" =>
         queue.push({
