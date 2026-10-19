@@ -8,8 +8,12 @@ set -euo pipefail
 #   INSTALL_DIR=/Applications scripts/macos/package-app.sh
 #
 # The bundle embeds libglfw so the app does not depend on Homebrew at runtime.
-# Signing is ad-hoc: fine for this machine, Gatekeeper will still block the app
-# on other machines until it is signed with a Developer ID.
+# It is signed with CODESIGN_IDENTITY when set, else with this Mac's Apple
+# Development certificate when one passes an OCSP revocation check, else
+# ad-hoc. macOS lets only a properly signed app post notifications as
+# itself; an ad-hoc signed app's notifications come through osascript and
+# show as Script Editor's. Gatekeeper still blocks the app on other machines
+# until it is signed with a Developer ID.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_NAME="MoonBit GitHub Client"
@@ -109,10 +113,42 @@ for s in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
 
-# arm64 requires a code signature; ad-hoc is enough for local installs.
-codesign --force --sign - "$APP_DIR/Contents/Frameworks/libglfw.3.dylib"
-codesign --force --sign - "$APP_DIR/Contents/MacOS/github-client"
-codesign --force --sign - "$APP_DIR"
+# arm64 requires a code signature. macOS treats an app signed with a revoked
+# certificate as malware and moves it to the Trash, and `find-identity -v`
+# still lists a revoked certificate as valid, so each candidate is checked
+# with OCSP first and used by its SHA-1 hash.
+certificate_usable() {
+  local hash="$1" pem
+  pem="$(mktemp)"
+  security find-certificate -a -Z -p 2>/dev/null \
+    | awk -v h="$hash" '/SHA-1 hash/{on=($3==h)} on&&/BEGIN CERT/{p=1} p{print} /END CERT/{p=0}' > "$pem"
+  if [[ -s "$pem" ]] && security verify-cert -c "$pem" -p codeSign -R ocsp -R require >/dev/null 2>&1; then
+    rm -f "$pem"
+    return 0
+  fi
+  rm -f "$pem"
+  return 1
+}
+IDENTITY="${CODESIGN_IDENTITY:-}"
+if [[ -z "$IDENTITY" ]]; then
+  for hash in $(security find-identity -v -p codesigning 2>/dev/null \
+      | grep '"Apple Development:' | grep -o -E '[0-9A-F]{40}' || true); do
+    if certificate_usable "$hash"; then
+      IDENTITY="$hash"
+      break
+    fi
+    echo "skip: certificate $hash is revoked or could not be checked" >&2
+  done
+fi
+IDENTITY="${IDENTITY:--}"
+codesign --force --sign "$IDENTITY" "$APP_DIR/Contents/Frameworks/libglfw.3.dylib"
+codesign --force --sign "$IDENTITY" "$APP_DIR/Contents/MacOS/github-client"
+codesign --force --sign "$IDENTITY" "$APP_DIR"
+if [[ "$IDENTITY" == "-" ]]; then
+  echo "signed: ad-hoc"
+else
+  echo "signed: $(codesign -dvv "$APP_DIR" 2>&1 | grep -m1 '^Authority=' | cut -d= -f2-)"
+fi
 
 mkdir -p "$INSTALL_DIR"
 rm -rf "$INSTALL_DIR/$APP_NAME.app"

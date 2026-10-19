@@ -66,6 +66,8 @@ Repository API calls resolve their credential automatically: an exact owner scop
 
 Each watched repository chooses what it brings in: `Pull requests`, `Issues`, `Releases`, and `For you`. Repositories start with pull requests, issues, and For you; Repositories shows a toggle per kind under each name. A kind switched off disappears at once. For you lists review requests, assignments, mentions, and subscriptions only from repositories that choose it.
 
+Notifications come from the app itself, with its name and icon, when it runs as an app bundle signed with a valid certificate; the first one asks for permission, and none is posted while notifications are turned off for the app in System Settings. Run outside a bundle (`scripts/macos/run.sh`), notifications go through `osascript` and show as Script Editor's.
+
 A repository that chooses Releases also picks which releases notify: `All releases`, `Major and minor` (the default), `Major only`, or `No notifications`. The level comes from the tag: `x.0.0` is major, `x.y.0` minor, anything else patch, and a tag without a version counts as minor. Pre-releases notify only with `All releases`. Releases lists every release whatever the choice. When a repository starts bringing in releases, those published more than 30 days earlier start as done.
 
 The options persist in `repositories.txt`, version 2: one repository per line with its kinds and release notification, separated by tabs. Version 1 files load with the defaults. Decisions are in ADR 0006.

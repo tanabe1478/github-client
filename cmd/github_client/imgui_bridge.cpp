@@ -2346,6 +2346,14 @@ extern "C" int github_client_imgui_render(
 // ---------------------------------------------------------------------------
 // Values staged by the last action, and view state read by MoonBit
 
+extern "C" int gc_native_notify(const char* title, const char* subtitle, const char* body);
+
+// Posts a notification from the app bundle (notify_macos.mm): 1 posted, 2
+// turned off by the person, 0 not available here.
+extern "C" int github_client_notify(const uint16_t* title, const uint16_t* subtitle, const uint16_t* body) {
+  return gc_native_notify(gc_utf8(title).c_str(), gc_utf8(subtitle).c_str(), gc_utf8(body).c_str());
+}
+
 extern "C" int github_client_imgui_take_settings(void) {
   const int value = gc_settings_request;
   gc_settings_request = 0;

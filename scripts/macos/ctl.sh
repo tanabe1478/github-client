@@ -48,6 +48,8 @@ commands:
   refresh-for-you       refresh personal activity only
   refresh-all           refresh watched and personal activity
   auto-refresh          run the auto refresh now; it posts notifications
+  notification-test     post a sample notification, to check how the app
+                        posts them
   show-done 0|1         toggle the "Show done" filter
   kind all|pr|issue     Inbox kind filter
   repo <owner/repo|all> Inbox repository filter
@@ -85,7 +87,7 @@ case "$1" in
       usage
     fi
     ;;
-  refresh|refresh-for-you|refresh-all|auto-refresh|undo|cancel|token-dialog|search|quit|project-rescan|suggest-watches)
+  refresh|refresh-for-you|refresh-all|auto-refresh|notification-test|undo|cancel|token-dialog|search|quit|project-rescan|suggest-watches)
     ;;
   show-done)
     ;;

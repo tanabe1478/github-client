@@ -129,6 +129,19 @@ async fn post_notification(
   subtitle : String,
   body : String,
 ) -> Unit {
+  // A signed app bundle posts as itself; osascript's notifications come
+  // from Script Editor, so it is only the fallback outside a bundle.
+  match github_client_notify(title, subtitle, body) {
+    1 => {
+      println(
+        "notification: posted title=\{title} subtitle=\{subtitle} body=\{body}",
+      )
+      return
+    }
+    // Turned off for the app: not sent around it as Script Editor.
+    2 => return
+    _ => ()
+  }
   let script = "display notification \"\{applescript_escape(body)}\" with title \"\{applescript_escape(title)}\" subtitle \"\{applescript_escape(subtitle)}\" sound name \"Glass\""
   let status = @async_shell.Cmd::Cmd("osascript", ["-e", script]).status() catch {
     error => {
@@ -2311,6 +2324,11 @@ async fn main {
         }
         // The control file's auto-refresh: the same job the timer starts,
         // which posts notifications.
+        // A sample notification, to check how notifications are posted.
+        44 =>
+          post_notification(
+            "acme/widget", "#1 A sample notification", "from the control file",
+          )
         35 =>
           if !saved_tokens.is_empty() && !pending_jobs.any(job => job is Auto) {
             last_auto_refresh = now

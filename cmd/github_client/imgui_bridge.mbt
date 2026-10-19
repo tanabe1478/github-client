@@ -183,3 +183,14 @@ fn imgui_view_project() -> String {
 fn imgui_view_related_only() -> Bool {
   github_client_imgui_view_related_only_raw() != 0
 }
+
+///|
+/// Posts a notification as the app (notify_macos.mm): 1 when posted, 2 when
+/// the person turned notifications off, 0 when this process is not an app
+/// bundle.
+#borrow(title, subtitle, body)
+extern "C" fn github_client_notify(
+  title : String,
+  subtitle : String,
+  body : String,
+) -> Int = "github_client_notify"

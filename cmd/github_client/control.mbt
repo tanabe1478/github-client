@@ -115,6 +115,7 @@ fn poll_control_commands(
       "refresh-for-you" => queue.push(control_command(21))
       "refresh-all" => queue.push(control_command(32))
       "auto-refresh" => queue.push(control_command(35))
+      "notification-test" => queue.push(control_command(44))
       "project-add" if rest != "" =>
         queue.push({ ..control_command(36), key: rest, })
       "project-remove" if argument != "" =>

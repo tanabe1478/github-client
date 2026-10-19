@@ -162,7 +162,7 @@ Run `./scripts/macos/ctl.sh` without arguments to list every command. `capture-s
 
 ## macOS app bundle
 
-`./scripts/macos/package-app.sh` makes a release build and installs it to `/Applications` as `MoonBit GitHub Client.app`. The bundle includes libglfw and is signed ad hoc. Set `INSTALL_DIR` to install elsewhere.
+`./scripts/macos/package-app.sh` makes a release build and installs it to `/Applications` as `MoonBit GitHub Client.app`. The bundle includes libglfw. It is signed with `CODESIGN_IDENTITY` when set, else with this Mac's Apple Development certificate when one passes an OCSP revocation check, else ad hoc. macOS treats an app signed with a revoked certificate as malware, and `security find-identity -v` still lists a revoked certificate as valid, so the script checks it first. Only a properly signed app posts notifications as itself; an ad hoc signed app's notifications go through `osascript` and show as Script Editor's. Set `INSTALL_DIR` to install elsewhere.
 
 ```sh
 ./scripts/macos/package-app.sh
