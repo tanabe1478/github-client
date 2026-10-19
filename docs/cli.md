@@ -10,7 +10,7 @@ Install it on macOS with `scripts/macos/install-cli.sh` (default destination `~/
 |---|---|
 | `inbox [--kind all\|pr\|issue] [--repo OWNER/NAME] [--query TEXT] [--all]` | Open pull requests and issues in watched repositories |
 | `for-you [--reason REASON] [--all]` | Review requests, assignments, mentions, and subscriptions in watched repositories that choose For you |
-| `releases [--repo OWNER/NAME] [--query TEXT] [--all] [--related] [--project OWNER/NAME]` | Releases of watched repositories that choose Releases, with how each relates to the base projects. `--related` keeps releases related to at least one base project; `--project` keeps releases related to that one |
+| `releases [--repo OWNER/NAME] [--query TEXT] [--all] [--related] [--project OWNER/NAME]` | Releases of watched repositories that choose Releases, and new versions of base project dependencies that have no GitHub releases to watch, from their registries (ADR 0008), with how each relates to the base projects. A registry version has the package as `repository`, the version as `tag`, its registry page as `url`, and the changelog's section as notes. `--related` keeps releases related to at least one base project; `--project` keeps releases related to that one |
 | `saved` | Saved items, done or not |
 | `done <url>...` | Mark items done at their current GitHub revision |
 | `undone <url>...` | Move items back to the inbox |

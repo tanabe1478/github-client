@@ -237,17 +237,24 @@ fn clean_repository(name : String?) -> String? {
 }
 
 ///|
-/// owner/name when `url` points at a GitHub repository, None when it points
-/// at another source host or nowhere a source lives.
-fn source_url_repository(url : String) -> String?? {
+/// The source host and owner/name `url` points at, such as
+/// ("github.com", "acme/widget") or ("bitbucket.org", "acme/widget"); None
+/// when it points nowhere a source lives. The owner/name is "" when the URL
+/// names a host but no repository.
+fn source_url_repository(url : String) -> (String, String)? {
   let trimmed = url.trim().to_owned()
-  guard source_hosts.any(host => {
-    trimmed.contains(host + "/") || trimmed.contains(host + ":")
-  }) else {
-    return None
+  for host in source_hosts {
+    for marker in [host + "/", host + ":"] {
+      match trimmed.find(marker) {
+        Some(index) => {
+          let rest = trimmed[index + marker.length():].to_owned()
+          return Some((host, clean_repository(Some(rest)).unwrap_or("")))
+        }
+        None => ()
+      }
+    }
   }
-  let github = trimmed.replace(old="git@github.com:", new="github.com/")
-  Some(clean_repository(github_name_from_url(github)))
+  None
 }
 
 ///|
@@ -329,9 +336,9 @@ fn substitute_pom_properties(value : String, pom : String) -> String {
 /// The GitHub repository a pom names, by Dependabot's rules: the first of
 /// `<url>`, `<scm><url>`, and `<issueManagement><url>` that points at a
 /// source host, else a GitHub URL anywhere in the pom whose repository is
-/// named like `artifact`. Some(None) means the pom points at a source that
-/// is not on GitHub, such as Bitbucket.
-pub fn pom_source(pom : String, artifact : String) -> String?? {
+/// named like `artifact`. The host can be other than GitHub, such as
+/// Bitbucket.
+pub fn pom_source(pom : String, artifact : String) -> (String, String)? {
   let candidates : Array[String] = []
   match xml_text(pom_project_fields(pom), "url") {
     Some(url) => candidates.push(url)
@@ -364,7 +371,7 @@ pub fn pom_source(pom : String, artifact : String) -> String?? {
           Some(repository) if repository
             .to_lower()
             .has_suffix("/" + artifact.to_lower()) =>
-            return Some(Some(repository))
+            return Some(("github.com", repository))
           _ => ()
         }
       }
@@ -430,8 +437,8 @@ pub fn plugin_marker_target(pom : String) -> (String, String, String)? {
 /// The GitHub repository an npm registry entry names, by Dependabot's
 /// rules: the first of `repository`, `homepage`, and `bugs` that points at a
 /// source host. `repository` can be "owner/name", "github:owner/name", or an
-/// object with `url`. Some(None) means the source is not on GitHub.
-pub fn npm_source(listing : String) -> String?? {
+/// object with `url`. The host can be other than GitHub.
+pub fn npm_source(listing : String) -> (String, String)? {
   let json = @json.parse(listing) catch { _ => return None }
   guard json is Object(fields) else { return None }
   for key in ["repository", "homepage", "bugs"] {

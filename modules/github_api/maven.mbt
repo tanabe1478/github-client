@@ -34,10 +34,16 @@ pub fn maven_pom_url(
 ///|
 /// The body of a public registry URL, or None when it answers 404. No token
 /// is sent, and nothing about the project beyond the URL.
-async fn get_public(url : String, registry : String) -> Result[String?, String] {
-  match registry_cache.get(url) {
-    Some(cached) => return Ok(Some(cached))
-    None => ()
+async fn get_public(
+  url : String,
+  registry : String,
+  cache? : Bool = true,
+) -> Result[String?, String] {
+  if cache {
+    match registry_cache.get(url) {
+      Some(cached) => return Ok(Some(cached))
+      None => ()
+    }
   }
   try {
     let started = @async.now()
@@ -54,9 +60,11 @@ async fn get_public(url : String, registry : String) -> Result[String?, String] 
     if response.code >= 301 && response.code <= 308 && url != "" {
       match response.headers.get(@http.CaseInsensitiveString("Location")) {
         Some(location) if location.has_prefix("https://") && location != url =>
-          return match get_public(location, registry) {
+          return match get_public(location, registry, cache~) {
             Ok(Some(text)) => {
-              registry_cache.set(url, text)
+              if cache {
+                registry_cache.set(url, text)
+              }
               Ok(Some(text))
             }
             other => other
@@ -71,7 +79,9 @@ async fn get_public(url : String, registry : String) -> Result[String?, String] 
       return Err("\{registry} request failed with status \{response.code}")
     }
     let text = body.text()
-    registry_cache.set(url, text)
+    if cache {
+      registry_cache.set(url, text)
+    }
     Ok(Some(text))
   } catch {
     _ => Err("\{registry} request failed before a response was received")
@@ -114,4 +124,106 @@ pub async fn get_npm_latest(name : String) -> Result[String?, String] {
   // A scoped name keeps its @ and encodes the slash: @types%2Fnode.
   let encoded = name.replace_all(old="/", new="%2F")
   get_public("https://registry.npmjs.org/\{encoded}/latest", "npm registry")
+}
+
+///|
+/// The `maven-metadata.xml` of a library or Gradle plugin marker: every
+/// published version. Read fresh each time, since new versions are added.
+pub async fn get_maven_metadata(
+  repository : String,
+  group : String,
+  artifact : String,
+) -> Result[String?, String] {
+  let registry = if repository == GRADLE_PLUGIN_PORTAL {
+    "Gradle Plugin Portal"
+  } else {
+    "Maven Central"
+  }
+  get_public(
+    "\{repository}/\{group.replace_all(old=".", new="/")}/\{artifact}/maven-metadata.xml",
+    registry,
+    cache=false,
+  )
+}
+
+///|
+/// The npm registry's whole document for a package, with every version
+/// and when it was published. Read fresh each time.
+pub async fn get_npm_document(name : String) -> Result[String?, String] {
+  let encoded = name.replace_all(old="/", new="%2F")
+  get_public(
+    "https://registry.npmjs.org/\{encoded}",
+    "npm registry",
+    cache=false,
+  )
+}
+
+///|
+/// The top-level file names of a public repository on Bitbucket or GitLab.
+/// Only the repository's name is sent.
+pub async fn list_hosted_files(
+  host : String,
+  repository : String,
+) -> Result[Array[String], String] {
+  let (url, key, array_field) = match host {
+    "bitbucket.org" =>
+      (
+        "https://api.bitbucket.org/2.0/repositories/\{repository}/src/HEAD/?pagelen=100",
+        "path",
+        "values",
+      )
+    "gitlab.com" =>
+      (
+        "https://gitlab.com/api/v4/projects/\{repository.replace_all(old="/", new="%2F")}/repository/tree?per_page=100",
+        "name",
+        "",
+      )
+    _ => return Err("\{host} is not a supported source host")
+  }
+  match get_public(url, host, cache=false) {
+    Ok(Some(text)) => {
+      let json = @json.parse(text) catch {
+        _ => return Err("\{host} file list could not be decoded")
+      }
+      let entries = match (json, array_field) {
+        (Array(items), "") => items
+        (Object(fields), field) =>
+          match fields.get(field) {
+            Some(Array(items)) => items
+            _ => []
+          }
+        _ => []
+      }
+      let names : Array[String] = []
+      for entry in entries {
+        match entry {
+          Object(fields) =>
+            match fields.get(key) {
+              Some(String(name)) => names.push(name)
+              _ => ()
+            }
+          _ => ()
+        }
+      }
+      Ok(names)
+    }
+    Ok(None) => Ok([])
+    Err(error) => Err(error)
+  }
+}
+
+///|
+/// A file at the default branch of a public repository on Bitbucket or
+/// GitLab, or None when it is not there.
+pub async fn get_hosted_file(
+  host : String,
+  repository : String,
+  path : String,
+) -> Result[String?, String] {
+  let url = match host {
+    "bitbucket.org" => "https://bitbucket.org/\{repository}/raw/HEAD/\{path}"
+    "gitlab.com" => "https://gitlab.com/\{repository}/-/raw/HEAD/\{path}"
+    _ => return Err("\{host} is not a supported source host")
+  }
+  get_public(url, host, cache=false)
 }

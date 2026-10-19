@@ -261,3 +261,75 @@ pub async fn has_releases(
     Err(error) => Err(error)
   }
 }
+
+///|
+/// The names of a repository's top-level files.
+pub async fn list_root_files(
+  token : String,
+  owner : String,
+  name : String,
+) -> Result[Array[String], String] {
+  match get_json(token, "/repos/\{owner}/\{name}/contents/") {
+    Ok(Array(entries)) => {
+      let names : Array[String] = []
+      for entry in entries {
+        match entry {
+          Object(fields) =>
+            match (fields.get("name"), fields.get("type")) {
+              (Some(String(file)), Some(String("file"))) => names.push(file)
+              _ => ()
+            }
+          _ => ()
+        }
+      }
+      Ok(names)
+    }
+    Ok(_) => Ok([])
+    Err(error) => Err(error)
+  }
+}
+
+///|
+/// A new version found on a registry rather than in GitHub releases
+/// (ADR 0008), as a release: `repository` is the package `name`, `tag` the
+/// version, and `notes` the changelog's section for it. `html_url` is the
+/// version's page on the registry.
+pub fn registry_release(
+  name : String,
+  version : String,
+  html_url : String,
+  published_at : String,
+  notes : String,
+  summary : String,
+  registry : String,
+) -> ActivitySummary {
+  let short = match name.rev_find(":") {
+    Some(index) => name[index + 1:].to_owned()
+    None => name
+  }
+  let summary = match summary {
+    "" => "A new version on \{registry}."
+    found => found
+  }
+  {
+    repository: name,
+    number: 0,
+    title: "\{short} \{version}",
+    html_url,
+    author: "",
+    updated_at: published_at,
+    tag: version,
+    summary,
+    notes,
+    prerelease: false,
+    kind: Release,
+    draft: false,
+    state: Open,
+  }
+}
+
+///|
+/// Whether a release is a version found on a registry, not a GitHub release.
+pub fn ActivitySummary::is_registry_version(self : ActivitySummary) -> Bool {
+  self.kind is Release && !self.html_url.has_prefix("https://github.com/")
+}

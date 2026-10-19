@@ -968,15 +968,25 @@ pub async fn fetch_project_profile(
 }
 
 ///|
-/// The GitHub repository of a Maven library, by Dependabot's rules
-/// (ADR 0007): its pom, then its parents. A Gradle build also looks on the
-/// Gradle Plugin Portal.
+/// Where a registry lookup found a dependency: the ecosystem and registry
+/// that publish its versions, and the source host and owner/name its entry
+/// names, if any.
+priv struct LookupResult {
+  ecosystem : String
+  registry : String
+  source : (String, String)?
+}
+
+///|
+/// The source a Maven library's pom names, by Dependabot's rules (ADR 0007):
+/// its pom, then its parents. A Gradle build also looks on the Gradle Plugin
+/// Portal. None when the library is on neither.
 async fn maven_source(
   gradle : Bool,
   group : String,
   artifact : String,
   version : String,
-) -> String? {
+) -> LookupResult? {
   let repositories = if gradle {
     [@github_api.MAVEN_CENTRAL, @github_api.GRADLE_PLUGIN_PORTAL]
   } else {
@@ -997,8 +1007,11 @@ async fn maven_source(
     }
   }
   guard found is Some((repository, pom)) else { return None }
+  let result = (source : (String, String)?) => {
+    Some({ ecosystem: "maven", registry: repository, source, })
+  }
   match @project_reader.pom_source(pom, artifact) {
-    Some(source) => return source
+    Some(source) => return result(Some(source))
     None => ()
   }
   // The first parent may be in any group; further ones only in the
@@ -1007,38 +1020,39 @@ async fn maven_source(
   for depth in 0..<5 {
     guard @project_reader.pom_parent(current)
       is Some((parent_group, parent_artifact, parent_version)) else {
-      return None
+      break
     }
-    guard depth == 0 || parent_group == group else { return None }
+    guard depth == 0 || parent_group == group else { break }
     let parent = match
       @github_api.get_pom(
         repository, parent_group, parent_artifact, parent_version,
       ) {
       Ok(Some(text)) => text
-      _ => return None
+      _ => break
     }
     match @project_reader.pom_source(parent, artifact) {
-      Some(Some(source)) =>
-        return if @project_reader.ancestor_source_accepted(
-            group, artifact, parent_group, source,
-          ) {
-          Some(source)
-        } else {
-          None
-        }
-      Some(None) => return None
+      Some((host, name)) =>
+        return result(
+          if @project_reader.ancestor_source_accepted(
+              group, artifact, parent_group, name,
+            ) {
+            Some((host, name))
+          } else {
+            None
+          },
+        )
       None => current = parent
     }
   }
-  None
+  result(None)
 }
 
 ///|
-/// The GitHub repository a registry names for one dependency.
+/// Where a registry publishes one dependency and the source it names.
 async fn lookup_source(
   gradle : Bool,
   lookup : @project_reader.PackageLookup,
-) -> String? {
+) -> LookupResult? {
   match lookup {
     Maven(group, artifact, version) =>
       maven_source(gradle, group, artifact, version)
@@ -1050,12 +1064,22 @@ async fn lookup_source(
           "\{id}.gradle.plugin",
           version,
         ) {
-        Ok(Some(marker)) =>
-          match @project_reader.plugin_marker_target(marker) {
+        Ok(Some(marker)) => {
+          // The plugin's versions are its marker's; its source is the
+          // library's.
+          let source = match @project_reader.plugin_marker_target(marker) {
             Some((group, artifact, version)) =>
-              maven_source(true, group, artifact, version)
+              maven_source(true, group, artifact, version).bind(found => {
+                found.source
+              })
             None => None
           }
+          Some({
+            ecosystem: "gradle-plugin",
+            registry: @github_api.GRADLE_PLUGIN_PORTAL,
+            source,
+          })
+        }
         Ok(None) => None
         Err(error) => {
           @github_api.log("base-project: plugin \{id}: \{error}")
@@ -1064,7 +1088,12 @@ async fn lookup_source(
       }
     Npm(name) =>
       match @github_api.get_npm_latest(name) {
-        Ok(Some(listing)) => @project_reader.npm_source(listing).unwrap_or(None)
+        Ok(Some(listing)) =>
+          Some({
+            ecosystem: "npm",
+            registry: "",
+            source: @project_reader.npm_source(listing),
+          })
         Ok(None) => None
         Err(error) => {
           @github_api.log("base-project: npm \{name}: \{error}")
@@ -1075,9 +1104,11 @@ async fn lookup_source(
 }
 
 ///|
-/// The profile with the GitHub repository of each dependency a registry
-/// names, and the repositories it depends on that publish no releases. A
-/// repository the registry names by an old name is followed to its new one.
+/// The profile with the source of each dependency a registry names, the
+/// repositories it depends on that publish no GitHub releases, and the
+/// dependencies followed through their registry's versions instead
+/// (ADR 0008). A repository the registry names by an old name is followed
+/// to its new one.
 async fn resolve_sources(
   token : String,
   profile : @domain.ProjectProfile,
@@ -1095,11 +1126,11 @@ async fn resolve_sources(
     max_concurrent=8,
   )
   let sources : Array[@domain.PackageSource] = []
-  for index, repository in found {
-    match repository {
-      Some(name) =>
-        sources.push({ name: lookups[index].tool_name(), repository: name, })
-      None => ()
+  for index, result in found {
+    match result {
+      Some({ source: Some((host, repository)), .. }) if repository != "" =>
+        sources.push({ name: lookups[index].tool_name(), repository, host, })
+      _ => ()
     }
   }
   let resolved = { ..profile, sources, }
@@ -1149,13 +1180,39 @@ async fn resolve_sources(
   }
   let kept : Array[@domain.PackageSource] = []
   for source in sources {
+    guard source.host == "github.com" else {
+      kept.push(source)
+      continue
+    }
     match renamed.get(source.repository) {
       Some("") => ()
       Some(name) => kept.push({ ..source, repository: name, })
       None => kept.push(source)
     }
   }
-  { ..resolved, sources: kept, unreleased, }
+  // What cannot be watched for GitHub releases is followed on its registry.
+  let followed : Array[@domain.FollowedPackage] = []
+  for index, result in found {
+    guard result is Some(lookup) else { continue }
+    let name = lookups[index].tool_name()
+    let source = kept
+      .search_by(source => source.name == name)
+      .map(at => kept[at])
+    let watchable = match source {
+      Some(found) =>
+        found.host == "github.com" && !unreleased.contains(found.repository)
+      None => false
+    }
+    guard !watchable else { continue }
+    followed.push({
+      name,
+      ecosystem: lookup.ecosystem,
+      registry: lookup.registry,
+      source_host: source.map(found => found.host).unwrap_or(""),
+      source_repository: source.map(found => found.repository).unwrap_or(""),
+    })
+  }
+  { ..resolved, sources: kept, unreleased, followed, }
 }
 
 ///|

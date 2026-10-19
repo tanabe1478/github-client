@@ -6,7 +6,7 @@ Repository code is the source of truth for behavior, accessibility, security, pl
 |---|---|---|
 | `inbox` | Inbox | Open issues and pull requests from watched repositories, grouped by repository, with kind, repository, and text filters |
 | `for-you` | For you | Review requests, assignments, mentions, and subscriptions from watched repositories, merged across every saved credential and deduplicated by activity URL, with a reason filter |
-| `releases` | Releases | Releases of watched repositories that choose Releases, newest first, with project, repository, and text filters and `Related only` |
+| `releases` | Releases | Releases of watched repositories that choose Releases, and new versions of base project dependencies found on their registries, newest first, with project, repository, and text filters and `Related only` |
 | `saved` | Saved | Activities and releases saved for later, kept independently of their done state |
 | `repositories` | Repositories | Watch by name, watch from account suggestions, unwatch, and choose what each watched repository brings in |
 | `settings` | Settings | Base projects, personal access tokens (default and owner/organization scopes), auto refresh, which merged or closed mentions to include and how many days back, and the local data location. The page scrolls when it is taller than the window. Cmd+, (Ctrl+, on Windows) opens it while no dialog is open |
@@ -33,6 +33,8 @@ GitHub's mention filter misses mentions in review comments on pull request diffs
 Mentioned lists open items only by default. In Settings, `Include merged pull requests` and `Include closed issues and pull requests` add those kinds when they were updated within the look-back (`mentions.include_merged`, `mentions.include_closed`, and `mentions.days` in `settings.txt`, see `docs/cli.md`). They come from both the mention filter and review comments and carry a neutral `Merged` or `Closed` label after their reasons. A typed look-back applies when the field loses focus; the step buttons apply at once.
 
 Release rows on Releases show the release name and the first sentence of its notes, then the repository, the tag, `@author`, and `released <date>`, with a `Pre-release` label for pre-releases. Drafts are not listed.
+
+Base project dependencies that cannot be watched for GitHub releases, such as one on Bitbucket or one whose repository only pushes tags, show their newest stable version from their registry instead (ADR 0008): one row per package, named by the package, titled with the version, and summarized by the first entry of the changelog's section for it, or `A new version on Maven Central.` without a changelog. The row opens the version's registry page. The description line counts these versions.
 
 ## Base projects
 

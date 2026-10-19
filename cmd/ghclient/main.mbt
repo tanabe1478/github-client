@@ -641,6 +641,16 @@ async fn run(invocation : Invocation) -> Int {
       }
       let (_, releases) = session.fetch_watched(chosen, releases_only)
       let profiles = session.fetch_profiles()
+      // New versions of dependencies that have no GitHub releases to watch
+      // (ADR 0008).
+      releases.append(
+        @activity_sync.fetch_registry_releases(
+          session.tokens,
+          session.repo_scopes,
+          session.owner_scopes,
+          profiles,
+        ),
+      )
       let relations : Map[String, Array[@domain.Relation]] = Map([])
       for release in releases {
         relations.set(
@@ -742,12 +752,24 @@ async fn run(invocation : Invocation) -> Int {
                 let json : Json = {
                   "name": source.name.to_json(),
                   "repository": source.repository.to_json(),
+                  "host": source.host.to_json(),
                 }
                 json
               })
               .to_json(),
               "unreleased": profile.unreleased.to_json(),
               "npm_registry": profile.npm_registry.to_json(),
+              "followed": profile.followed
+              .map(followed => {
+                let json : Json = {
+                  "name": followed.name.to_json(),
+                  "ecosystem": followed.ecosystem.to_json(),
+                  "source_host": followed.source_host.to_json(),
+                  "source_repository": followed.source_repository.to_json(),
+                }
+                json
+              })
+              .to_json(),
               "problem": profile.problem.to_json(),
             }
             json

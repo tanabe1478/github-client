@@ -25,6 +25,7 @@ fn web_profile() -> ProjectProfile {
     sources: [],
     unreleased: [],
     npm_registry: "",
+    followed: [],
     problem: "",
   }
 }
@@ -224,6 +225,7 @@ fn service_profile() -> ProjectProfile {
     sources: [],
     unreleased: [],
     npm_registry: "",
+    followed: [],
     problem: "",
   }
 }
@@ -467,9 +469,17 @@ fn library_profile() -> ProjectProfile {
       },
     ],
     sources: [
-      { name: "com.acme.logs:logs-spring-starter", repository: "acme/logbook", },
-      { name: "com.acme.logs:logs-core", repository: "acme/logbook", },
-      { name: "@types/widget", repository: "acme/typings", },
+      {
+        name: "com.acme.logs:logs-spring-starter",
+        repository: "acme/logbook",
+        host: "github.com",
+      },
+      {
+        name: "com.acme.logs:logs-core",
+        repository: "acme/logbook",
+        host: "github.com",
+      },
+      { name: "@types/widget", repository: "acme/typings", host: "github.com", },
     ],
     unreleased: ["acme/typings"],
   }
@@ -511,4 +521,29 @@ test "a release relates through the library's registry source" {
     release_relations("acme/logbook", "4.2.0", "", [web_profile()]).length(),
     0,
   )
+}
+
+///|
+test "pre-releases are told from stable versions" {
+  for
+    version in [
+      "2.0.0-beta.1", "4.0.0-M2", "1.0-RC1", "2.0.0.Beta1", "1.0-SNAPSHOT", "3.0.0-alpha",
+      "5.0.0.CR1", "1.2.0-dev.3",
+    ] {
+    assert_true(prerelease_version(version), msg="\{version}")
+  }
+  for version in ["10.10", "33.7.1-jre", "0.31.10.RELEASE", "1.18.34", "2.0.19"] {
+    assert_false(prerelease_version(version), msg="\{version}")
+  }
+}
+
+///|
+test "the newest stable version newer than the one in use" {
+  let versions = ["10.9.1", "10.10", "11.0-beta1", "9.0"]
+  assert_eq(newest_version(versions, "10.9.1"), Some("10.10"))
+  assert_eq(newest_version(versions, "^10.0.0"), Some("10.10"))
+  assert_eq(newest_version(versions, "10.10"), None)
+  // A project on a pre-release also gets pre-releases.
+  assert_eq(newest_version(versions, "11.0-alpha1"), None)
+  assert_eq(newest_version(versions, "10.10-beta1"), Some("11.0-beta1"))
 }

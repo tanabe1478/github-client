@@ -345,6 +345,7 @@ pub fn parse_files(
     sources: [],
     unreleased: [],
     npm_registry,
+    followed: [],
   }
 }
 

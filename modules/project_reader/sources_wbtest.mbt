@@ -6,7 +6,7 @@ test "a pom names its repository by url, scm, or issue tracker" {
     #|  <url>https://github.com/acme/widget</url>
     #|  <licenses><license><url>https://example.com/license</url></license></licenses>
     #|</project>
-  assert_eq(pom_source(by_url, "widget"), Some(Some("acme/widget")))
+  assert_eq(pom_source(by_url, "widget"), Some(("github.com", "acme/widget")))
   // A homepage that is not a source host falls through to scm, whose url
   // is a property, as AWS SDK and Flyway write it.
   let by_scm =
@@ -20,12 +20,18 @@ test "a pom names its repository by url, scm, or issue tracker" {
     #|    <connection>scm:git:git://github.com/acme/widget-sdk.git</connection>
     #|  </scm>
     #|</project>
-  assert_eq(pom_source(by_scm, "widget-core"), Some(Some("acme/widget-sdk")))
+  assert_eq(
+    pom_source(by_scm, "widget-core"),
+    Some(("github.com", "acme/widget-sdk")),
+  )
   let by_issues =
     #|<project>
     #|  <issueManagement><url>https://github.com/acme/widget/issues</url></issueManagement>
     #|</project>
-  assert_eq(pom_source(by_issues, "widget"), Some(Some("acme/widget")))
+  assert_eq(
+    pom_source(by_issues, "widget"),
+    Some(("github.com", "acme/widget")),
+  )
   // Bitbucket is a source, so it wins over a GitHub URL further down, but
   // it cannot be watched.
   let on_bitbucket =
@@ -33,7 +39,10 @@ test "a pom names its repository by url, scm, or issue tracker" {
     #|  <url>https://bitbucket.org/acme/widget</url>
     #|  <scm><url>https://github.com/acme/widget</url></scm>
     #|</project>
-  assert_eq(pom_source(on_bitbucket, "widget"), Some(None))
+  assert_eq(
+    pom_source(on_bitbucket, "widget"),
+    Some(("bitbucket.org", "acme/widget")),
+  )
   assert_eq(
     pom_source(
       "<project><url>https://widgets.example.com</url></project>", "widget",
@@ -49,7 +58,7 @@ test "a GitHub URL elsewhere in a pom counts only when named like the artifact" 
     #|  <description>See https://github.com/acme/widget-docs and
     #|  https://github.com/acme/widget#readme</description>
     #|</project>
-  assert_eq(pom_source(pom, "widget"), Some(Some("acme/widget")))
+  assert_eq(pom_source(pom, "widget"), Some(("github.com", "acme/widget")))
   assert_eq(pom_source(pom, "gadget"), None)
 }
 
@@ -113,7 +122,7 @@ test "an npm entry names its repository by repository, homepage, or bugs" {
         #|{"repository":{"type":"git","url":"git+https://github.com/acme/widgets.git","directory":"packages/widget"}}
       ),
     ),
-    Some(Some("acme/widgets")),
+    Some(("github.com", "acme/widgets")),
   )
   assert_eq(
     npm_source(
@@ -121,7 +130,7 @@ test "an npm entry names its repository by repository, homepage, or bugs" {
         #|{"repository":"acme/widgets"}
       ),
     ),
-    Some(Some("acme/widgets")),
+    Some(("github.com", "acme/widgets")),
   )
   assert_eq(
     npm_source(
@@ -129,7 +138,7 @@ test "an npm entry names its repository by repository, homepage, or bugs" {
         #|{"repository":"github:acme/widgets"}
       ),
     ),
-    Some(Some("acme/widgets")),
+    Some(("github.com", "acme/widgets")),
   )
   assert_eq(
     npm_source(
@@ -137,7 +146,7 @@ test "an npm entry names its repository by repository, homepage, or bugs" {
         #|{"homepage":"https://github.com/acme/widgets#readme"}
       ),
     ),
-    Some(Some("acme/widgets")),
+    Some(("github.com", "acme/widgets")),
   )
   assert_eq(
     npm_source(
@@ -145,7 +154,7 @@ test "an npm entry names its repository by repository, homepage, or bugs" {
         #|{"repository":{"url":"git@github.com:acme/widgets.git"}}
       ),
     ),
-    Some(Some("acme/widgets")),
+    Some(("github.com", "acme/widgets")),
   )
   assert_eq(
     npm_source(
@@ -153,7 +162,7 @@ test "an npm entry names its repository by repository, homepage, or bugs" {
         #|{"homepage":"https://widgets.example.com","bugs":{"url":"https://gitlab.com/acme/widgets/issues"}}
       ),
     ),
-    Some(None),
+    Some(("gitlab.com", "acme/widgets")),
   )
   assert_eq(
     npm_source(

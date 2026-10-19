@@ -26,15 +26,15 @@ Pureなproduct modelとrelevance rule。filesystem、HTTP、GLFW、Dear ImGuiを
 
 ### `modules/github_api`
 
-必要なGitHub endpoint、request/response、HTTP transportを所有する。ベースプロジェクトのBOMを取るMaven Centralへのrequest（tokenを付けない）もここに置く。domainやstorageを参照しない。API DTOからdomainへの変換はdesktop composition rootまたは将来のapplication service moduleが担当する。
+必要なGitHub endpoint、request/response、HTTP transportを所有する。ベースプロジェクトのBOMと依存の情報を取る公開registry（Maven Central、Gradle Plugin Portal、npm registry）へのrequestと、BitbucketとGitLabの公開のファイルの取得（いずれもtokenを付けない）もここに置く。domainやstorageを参照しない。API DTOからdomainへの変換はdesktop composition rootまたは将来のapplication service moduleが担当する。
 
 ### `modules/activity_sync`
 
-GitHub activityの取得手順（token選択、並列取得、失敗の記録）とAPI DTOからdomainの`ActivityItem`への変換を所有する。desktopとCLIが共有する。domain、GitHub API、credential storeのlogin label、project readerのみを参照し、他のstorageとUIを参照しない。ベースプロジェクトのファイルの取得（ADR 0007）もここが担う。
+GitHub activityの取得手順（token選択、並列取得、失敗の記録）とAPI DTOからdomainの`ActivityItem`への変換を所有する。desktopとCLIが共有する。domain、GitHub API、credential storeのlogin label、project readerのみを参照し、他のstorageとUIを参照しない。ベースプロジェクトのファイルの取得（ADR 0007）と、registryの版とCHANGELOGの取得（ADR 0008）もここが担う。
 
 ### `modules/project_reader`
 
-ベースプロジェクトのファイル（npm、pnpm、Gradle、Maven、Javaの版、Springの設定）からdomainの`ProjectProfile`を作る解析、読むファイルの選択、BOMの版の適用と、ローカルのディレクトリからGitHubリポジトリ（`.git/config`の`origin`）を探す処理を所有する。domainのみを参照し、HTTP、storage、UIを参照しない。設定ファイルの値は保持しない。
+ベースプロジェクトのファイル（npm、pnpm、Gradle、Maven、Javaの版、Springの設定）からdomainの`ProjectProfile`を作る解析、読むファイルの選択、BOMの版の適用、registryの情報（pom、npmの文書、`maven-metadata.xml`）とCHANGELOGの解析と、ローカルのディレクトリからGitHubリポジトリ（`.git/config`の`origin`）を探す処理を所有する。domainのみを参照し、HTTP、storage、UIを参照しない。設定ファイルの値は保持しない。
 
 ### `modules/app_paths`
 

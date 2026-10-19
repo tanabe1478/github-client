@@ -46,6 +46,26 @@ pub(all) struct ProjectProfile {
   /// one, such as a company proxy; "" otherwise. Its packages are looked up
   /// on registry.npmjs.org only when it is set as a public mirror.
   npm_registry : String
+  /// Dependencies whose new versions come from their registry, since no
+  /// GitHub releases can be watched for them (ADR 0008).
+  followed : Array[FollowedPackage]
+} derive(Eq, Debug)
+
+///|
+/// A dependency followed through its registry's versions: one whose source
+/// is not on GitHub (nimbus-jose-jwt is on Bitbucket), whose GitHub
+/// repository publishes no releases, or whose source is unknown.
+pub(all) struct FollowedPackage {
+  /// The tool name, such as "com.nimbusds:nimbus-jose-jwt" or "dotenv".
+  name : String
+  /// "maven" or "npm".
+  ecosystem : String
+  /// The Maven repository its pom came from; "" for npm.
+  registry : String
+  /// Where its source lives, such as "bitbucket.org"; "" when unknown.
+  source_host : String
+  /// owner/name on `source_host`.
+  source_repository : String
 } derive(Eq, Debug)
 
 ///|
@@ -56,13 +76,16 @@ pub(all) struct PackageSource {
   name : String
   /// owner/name.
   repository : String
+  /// "github.com", or another source host such as "bitbucket.org", which
+  /// cannot be watched.
+  host : String
 } derive(Eq, Debug)
 
 ///|
 /// The GitHub repository a profile's registry lookups found for a tool.
 pub fn source_repository(profile : ProjectProfile, name : String) -> String? {
   for source in profile.sources {
-    if source.name == name {
+    if source.name == name && source.host == "github.com" {
       return Some(source.repository)
     }
   }
@@ -129,6 +152,11 @@ let known_packages : Map[String, (String, String)] = Map([
 /// The package a release belongs to: the prefix of a tag such as
 /// "pnpr@0.1.0", a known repository, or the repository's name.
 pub fn release_package(repository : String, tag : String) -> String {
+  // A version found on a registry is named by its package, such as
+  // "@types/widget" or "com.acme:widget" (ADR 0008).
+  if repository.has_prefix("@") || repository.contains(":") {
+    return repository
+  }
   match tag.find("@") {
     Some(index) if index > 0 => return tag[:index].to_owned()
     _ => ()
@@ -210,6 +238,66 @@ pub fn headline_tools(profile : ProjectProfile) -> Array[String] {
     shown.push("\{name} \{tool.version}")
   }
   shown
+}
+
+///|
+/// Whether a registry version is a pre-release: npm's "2.0.0-beta.1", or
+/// Maven's "4.0.0-M2", "1.0-RC1", "2.0.0.Beta1", and snapshots.
+pub fn prerelease_version(version : String) -> Bool {
+  let lower = version.to_lower()
+  if lower.contains("snapshot") {
+    return true
+  }
+  for
+    marker in [
+      "alpha", "beta", "rc", "cr", "-m", ".m", "preview", "ea", "dev", "pre",
+    ] {
+    let mut rest = lower
+    while rest.find(marker) is Some(index) {
+      // A marker counts when a separator or a digit precedes it and a
+      // digit, separator, or the end follows: "1.0-rc1" but not "search".
+      let before = if index == 0 {
+        '.'
+      } else {
+        rest.get_char(index - 1).unwrap_or('.')
+      }
+      let after = rest.get_char(index + marker.length()).unwrap_or('.')
+      let separated = before == '.' ||
+        before == '-' ||
+        before == '_' ||
+        (before >= '0' && before <= '9') ||
+        marker.has_prefix("-") ||
+        marker.has_prefix(".")
+      let ends = after == '.' ||
+        after == '-' ||
+        after == '_' ||
+        (after >= '0' && after <= '9')
+      if separated && ends {
+        return true
+      }
+      rest = rest[index + marker.length():].to_owned()
+    }
+  }
+  false
+}
+
+///|
+/// The newest stable version in `versions` that is newer than `used`, or
+/// None. A pre-release counts only when `used` is one.
+pub fn newest_version(versions : Array[String], used : String) -> String? {
+  guard parse_version(used) is Some(current) else { return None }
+  let stable_only = !prerelease_version(used)
+  let mut best : (String, Version)? = None
+  for version in versions {
+    guard !stable_only || !prerelease_version(version) else { continue }
+    guard parse_version(version) is Some(parsed) else { continue }
+    guard parsed.compare_to(current) > 0 else { continue }
+    match best {
+      Some((_, kept)) if parsed.compare_to(kept) <= 0 => ()
+      _ => best = Some((version, parsed))
+    }
+  }
+  best.map(entry => entry.0)
 }
 
 ///|

@@ -81,6 +81,7 @@ npmとMavenの依存は、名前からはGitHubのリポジトリが分からな
 - 候補は、GitHub Actions、Terraformのprovider、Terraform本体、既知の対応表のパッケージ（pnpm、npm、Node.js、yarn、Spring Boot、Spring Framework、Gradle）と、registryからリポジトリが分かったnpmとMavenの依存にする。1つのリポジトリが複数の依存を出すとき（AWS SDKのservice clientなど）は1件にまとめる。
 - リリースのあるものを先に、使っているプロジェクトの多い順に並べ、プロジェクトごとの版を添える。registryで分かった依存は、パッケージ名も添える（DefinitelyTypedは多くの`@types`を出すため）。リリースのないものは最後に「No GitHub releases」と示す。最初はどれも選ばない。数が多く、選ばずにWatchすると通知が増えるためである。
 - Watchしたリポジトリはリリースだけを取り込む（Pull requests、Issues、For youはオフ）。1回の取得でまとめて読む。
+- リリースのない依存は、Watchの代わりにregistryの版をReleasesに出す（ADR 0008）。
 - `ghclient watch-candidates`が同じ候補を出す（`released`でリリースの有無）。AIエージェントは`ghclient watch <owner/name> --kinds releases`でWatchする。
 
 ### 関連の判定

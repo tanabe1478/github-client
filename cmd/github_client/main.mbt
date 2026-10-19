@@ -244,6 +244,9 @@ async fn main {
   let pull_requests : Array[@github_api.ActivitySummary] = []
   let issues : Array[@github_api.ActivitySummary] = []
   let releases : Array[@github_api.ActivitySummary] = []
+  // New versions of base project dependencies that have no GitHub releases,
+  // from their registries (ADR 0008).
+  let registry_releases : Array[@github_api.ActivitySummary] = []
   // Base projects as read from GitHub, and the relations of each release to
   // them, rebuilt when either changes (ADR 0007).
   let mut profiles : Array[@domain.ProjectProfile] = []
@@ -836,6 +839,10 @@ async fn main {
         profiles = []
         profiles_revision += 1
       }
+      if !registry_releases.is_empty() {
+        registry_releases.clear()
+        releases_revision += 1
+      }
       return
     }
     loading_detail = "Base projects"
@@ -851,6 +858,17 @@ async fn main {
     }
     profiles = next
     profiles_revision += 1
+    loading_detail = "Registry versions"
+    let found = @activity_sync.fetch_registry_releases(
+      saved_tokens, repo_scopes, owner_scopes, next,
+    )
+    if generation != active_generation {
+      return
+    }
+    registry_releases.clear()
+    registry_releases.append(found)
+    releases_revision += 1
+    println("registry: \{found.length()} new versions")
   }
 
   fn queue_base_projects() -> Unit {
@@ -1256,7 +1274,7 @@ async fn main {
     for
       activities in [
         pull_requests, issues, review_requests, assignments, mentions, subscriptions,
-        kept_review_requests, releases,
+        kept_review_requests, releases, registry_releases,
       ] {
       for activity in activities {
         keep.set(activity.html_url(), true)
@@ -1336,13 +1354,13 @@ async fn main {
         last_control_poll = now
         poll_control_commands(control_path, control_queue, [
           pull_requests, issues, review_requests, assignments, mentions, subscriptions,
-          releases,
+          releases, registry_releases,
         ])
       }
       for
         activities in [
           pull_requests, issues, review_requests, assignments, mentions, subscriptions,
-          releases,
+          releases, registry_releases,
         ] {
         for activity in activities {
           seen_revisions.set(activity.html_url(), activity.updated_at())
@@ -1613,6 +1631,7 @@ async fn main {
           releases.filter(activity => {
             chosen(activity, options => options.releases)
           }),
+          registry_releases,
         ],
         muted_urls,
       )
@@ -1622,7 +1641,7 @@ async fn main {
         indexed_revisions = (releases_revision, profiles_revision)
         relation_index = Map([])
         if !profiles.is_empty() {
-          for release in releases {
+          for release in [..releases, ..registry_releases] {
             let found = @domain.release_relations(
               release.repository(),
               release.tag(),
@@ -1731,7 +1750,7 @@ async fn main {
               @activity_sync.saved_items(
                 [
                   pull_requests, issues, review_requests, assignments, mentions,
-                  subscriptions, releases,
+                  subscriptions, releases, registry_releases,
                 ],
                 saved_urls,
                 muted_urls,
@@ -1782,7 +1801,12 @@ async fn main {
           } else {
             " · \{related_count} related to your base projects"
           }
-          "\{releases_unread} unread of \{release_items.length()}\{related} · releases from \{count} watched \{noun}"
+          let registry = match registry_releases.length() {
+            0 => ""
+            1 => " and 1 new version from a registry"
+            found => " and \{found} new versions from registries"
+          }
+          "\{releases_unread} unread of \{release_items.length()}\{related} · releases from \{count} watched \{noun}\{registry}"
         }
         Repositories =>
           "Choose what each watched repository brings into Inbox, For you, and Releases."
