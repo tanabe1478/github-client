@@ -25,6 +25,9 @@ commands:
                         pull-requests,issues,releases,for-you
   release-notify <owner/repo> all|major-minor|major|off
                         which releases of a watched repository notify
+  watch-base <owner/repo>
+                        toggle whether a watched repository is a base
+                        project whose dependencies are read
   project-add <owner/name|url|directory>
                         add base projects; a directory adds every
                         GitHub repository found in it
@@ -75,7 +78,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 case "$1" in
-  open|done|save|unsub|unsubscribe|nav|watch|unwatch|kind|repo|reason|expand|menu|project-add|project-remove|project-follow|npm-mirror-add|npm-mirror-remove|suggest-watch|related-only|project|why)
+  open|done|save|unsub|unsubscribe|nav|watch|unwatch|watch-base|kind|repo|reason|expand|menu|project-add|project-remove|project-follow|npm-mirror-add|npm-mirror-remove|suggest-watch|related-only|project|why)
     if [[ $# -lt 2 ]]; then
       echo "$1 requires an argument" >&2
       usage

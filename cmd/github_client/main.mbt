@@ -1946,7 +1946,7 @@ async fn main {
             shown
           },
         ),
-        repositories_text(watched, watch_options),
+        repositories_text(watched, watch_options, settings.base_repositories),
         suggestions_text(
           suggested_repositories,
           watched,
@@ -2279,6 +2279,29 @@ async fn main {
           watch_for_releases(names)
         }
         41 => open_watch_suggestions(false)
+        // A watched repository's Base project toggle: read its dependencies
+        // as a base project, or stop.
+        45 => {
+          let key = github_client_imgui_take_selected_repository()
+          let current = settings.base_repositories
+          match current.search_by(name => name.to_lower() == key.to_lower()) {
+            Some(index) => {
+              let name = current[index]
+              if save_base_repositories(
+                  current.filter(repository => repository != name),
+                ) {
+                notify("Removed \{name} from base projects.", None)
+                println("ui-action: base-project.remove \{name}")
+              }
+            }
+            None =>
+              if save_base_repositories([..current, key]) {
+                suggest_pending = true
+                notify("Reading what \{key} depends on.", None)
+                println("ui-action: base-project.add \{key}")
+              }
+          }
+        }
         39 => {
           // Use the name a renamed base project has now.
           let name = github_client_imgui_take_key()

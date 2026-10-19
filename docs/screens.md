@@ -64,7 +64,7 @@ Repository API calls resolve their credential automatically: an exact owner scop
 
 ## Watch options
 
-Each watched repository chooses what it brings in: `Pull requests`, `Issues`, `Releases`, and `For you`. Repositories start with pull requests, issues, and For you; Repositories shows a toggle per kind under each name. A kind switched off disappears at once. For you lists review requests, assignments, mentions, and subscriptions only from repositories that choose it.
+Each watched repository chooses what it brings in: `Pull requests`, `Issues`, `Releases`, and `For you`. Repositories start with pull requests, issues, and For you; Repositories shows a toggle per kind under each name. A kind switched off disappears at once. A separate `Base project` toggle after the kinds makes the repository a base project, so its dependencies are read and releases are matched against it (ADR 0007), or stops that; it changes the same `base.repository` lines as the Base projects card in Settings. For you lists review requests, assignments, mentions, and subscriptions only from repositories that choose it.
 
 Notifications come from the app itself, with its name and icon, when it runs as an app bundle signed with a valid certificate; the first one asks for permission, and none is posted while notifications are turned off for the app in System Settings. Run outside a bundle (`scripts/macos/run.sh`), notifications go through `osascript` and show as Script Editor's.
 

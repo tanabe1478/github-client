@@ -17,6 +17,7 @@ ADR 0006でリリースを受け取れるようになった。しかし、どの
 
 - ベースプロジェクトはGitHubのリポジトリ（`owner/name`）で指定する。中身はGitHub APIで読む（push済みの既定branch）。
 - 複数を登録できる。Settingsの一番上の「Base projects」カードで追加、Rescan、削除する。
+- Watch中のリポジトリは、Repositoriesの行の「Base project」の切り替えでも登録と削除ができる。Watchした依存先や自分のリポジトリの依存も読みたいとき、別の画面で名前を入れ直さずに済むようにする。登録先は同じ`settings.txt`である。
 - GitHubのURL（`https://github.com/owner/name`）を貼ってもよい。
 - ディレクトリを指定すると、その下のGitリポジトリを探し（`.git/config`のGitHubの`origin`）、見つかったリポジトリをすべて登録する。ディレクトリ自体は登録しない。複数のリポジトリをまとめて置いたフォルダを、一度に登録するための入口である。
 - 登録内容は`settings.txt`に書く（`base.repository = owner/name`を1行ずつ）。人やAIが直接編集でき、アプリは外での変更を読み直す（ADR 0004と同じ方針）。

@@ -1342,7 +1342,15 @@ static int gc_render_repositories(const GcFrame& frame, float width) {
   ImVec2 list = ImGui::GetCursorScreenPos();
   gc_text(draw, gc_font_bold, GC_BODY, list, GC_FG, heading);
   list.y += 28.0f;
-  const float row_h = 84.0f;
+  // The Base project toggle follows the kind toggles, or goes on a line of
+  // its own when the column is too narrow for both.
+  float toggles_w = 46.0f;
+  for (const char* label : {"Pull requests", "Issues", "Releases", "For you"}) {
+    toggles_w += gc_text_size(gc_font_bold, 12.0f, label).x + 34.0f + 6.0f;
+  }
+  toggles_w += 10.0f + gc_text_size(gc_font_bold, 12.0f, "Base project").x + 34.0f;
+  const bool base_wraps = toggles_w > col_w - 28.0f;
+  const float row_h = base_wraps ? 114.0f : 84.0f;
   // The list scrolls on its own; the note stays under it.
   ImGui::SetCursorScreenPos(list);
   const float list_h = ImMax(52.0f, ImGui::GetContentRegionAvail().y - 20.0f - 30.0f);
@@ -1407,6 +1415,24 @@ static int gc_render_repositories(const GcFrame& frame, float width) {
       gc_text(wdraw, on ? gc_font_bold : gc_font_regular, 12.0f, ImVec2(cp.x + 24.0f, cp.y + 5.0f), on ? GC_ACCENT_EMPHASIS : GC_MUTED, kind.label);
       if (pressed) { gc_selected_repository = name; gc_selected_key = std::string("toggle:") + kind.key; action = 34; }
       cx += w + 6.0f;
+    }
+    // Base project: read what the repository depends on (ADR 0007), shown
+    // apart from the kinds it brings in.
+    {
+      const bool on = gc_field(frame.repositories[k], 3) == "1";
+      const char* label = "Base project";
+      cx = base_wraps ? origin.x + 46.0f : cx + 10.0f;
+      const float w = gc_text_size(on ? gc_font_bold : gc_font_regular, 12.0f, label).x + 20.0f + 14.0f;
+      const ImVec2 cp(cx, y + (base_wraps ? 80.0f : 48.0f));
+      ImGui::SetCursorScreenPos(cp);
+      const bool pressed = ImGui::InvisibleButton("##watched.base", ImVec2(w, 24.0f));
+      const bool hovered = ImGui::IsItemHovered();
+      wdraw->AddRectFilled(cp, ImVec2(cp.x + w, cp.y + 24.0f), on ? GC_ACCENT_SUBTLE : hovered ? GC_CANVAS : GC_WHITE, 12.0f);
+      wdraw->AddRect(cp, ImVec2(cp.x + w, cp.y + 24.0f), on ? GC_ACCENT_BORDER : GC_BORDER, 12.0f);
+      if (on) gc_icon(wdraw, GC_ICON_CHECK, ImVec2(cp.x + 8.0f, cp.y + 6.0f), 12.0f, GC_ACCENT_EMPHASIS);
+      gc_text(wdraw, on ? gc_font_bold : gc_font_regular, 12.0f, ImVec2(cp.x + 24.0f, cp.y + 5.0f), on ? GC_ACCENT_EMPHASIS : GC_MUTED, label);
+      if (hovered) ImGui::SetTooltip(on ? "Its dependencies are read, and releases are matched against them" : "Read what it depends on, so releases are matched against it");
+      if (pressed) { gc_selected_repository = name; action = 45; }
     }
     ImGui::PopID();
   }

@@ -199,15 +199,20 @@ fn projects_text(
 }
 
 ///|
-/// One line per watched repository: name, kinds, release notification.
+/// One line per watched repository: name, kinds, release notification, and
+/// whether it is a base project whose dependencies are read (ADR 0007).
 fn repositories_text(
   repositories : Array[@domain.RepositoryRef],
   options : Map[String, @domain.WatchOptions],
+  base_repositories : Array[String],
 ) -> String {
   repositories
   .map(repository => {
     let entry = @domain.watch_options_for(options, repository.key())
-    "\{repository.key()}\t\{entry.kinds_text()}\t\{entry.release_notify.name()}"
+    let base = base_repositories.any(name => {
+      name.to_lower() == repository.key().to_lower()
+    })
+    "\{repository.key()}\t\{entry.kinds_text()}\t\{entry.release_notify.name()}\t\{flag(base)}"
   })
   .join("\n")
 }

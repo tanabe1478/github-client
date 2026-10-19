@@ -105,6 +105,8 @@ fn poll_control_commands(
           repository: argument,
           key: "kinds:\{parts[2]}",
         })
+      "watch-base" if argument != "" =>
+        queue.push({ ..control_command(45), repository: argument, })
       "release-notify" if argument != "" && parts.length() > 2 =>
         queue.push({
           ..control_command(34),
