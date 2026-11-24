@@ -69,6 +69,26 @@ pub fn pull_request_reviews_path(
 }
 
 ///|
+/// Issue and pull request timelines share the issues route.
+pub fn issue_timeline_path(
+  owner : String,
+  name : String,
+  number : Int,
+  page : Int,
+) -> String {
+  "/repos/\{owner}/\{name}/issues/\{number}/timeline?per_page=100&page=\{page}"
+}
+
+///|
+pub fn pull_request_commits_path(
+  owner : String,
+  name : String,
+  number : Int,
+) -> String {
+  "/repos/\{owner}/\{name}/pulls/\{number}/commits?per_page=100"
+}
+
+///|
 pub fn repository_pulls_path(
   owner : String,
   name : String,

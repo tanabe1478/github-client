@@ -1212,13 +1212,39 @@ async fn main {
             candidates.push((activity, "Mentioned"))
           }
         }
+        let changed : Array[((@github_api.ActivitySummary, String), String?)] = []
         for entry in candidates {
           let url = entry.0.html_url()
+          let seen = seen_revisions.get(url)
           if !muted_urls.contains(url) &&
             !fresh_urls.contains(url) &&
-            seen_revisions.get(url) != Some(entry.0.updated_at()) {
+            seen != Some(entry.0.updated_at()) {
             fresh_urls.set(url, true)
-            fresh.push(entry)
+            changed.push((entry, seen))
+          }
+        }
+        // The viewer's own approvals, comments, and pushes are not news.
+        let logins = @activity_sync.saved_logins()
+        let own = @async.all(
+          changed.map(change => {
+            async fn() -> Bool {
+              @activity_sync.updated_only_by(
+                saved_tokens,
+                repo_scopes,
+                owner_scopes,
+                change.0.0,
+                change.1,
+                logins,
+              )
+            }
+          }),
+          max_concurrent=6,
+        )
+        for index, change in changed {
+          if own[index] {
+            println("notification: skipped own update \{change.0.0.html_url()}")
+          } else {
+            fresh.push(change.0)
           }
         }
         if generation != active_generation {

@@ -130,6 +130,8 @@ GitHub fetches run as background tasks, one job at a time, so the window keeps r
 
 When auto refresh finds new or updated items, up to three post individual notifications: the repository (or the For you reason) as title, `#number title` as subtitle, and the author or repository as body. More than three post one summary grouped by repository. Manual refreshes and muted items never notify.
 
+An update made only by the viewer, such as their own approval, comment, merge, or push, does not notify. The app reads the timeline of each updated issue or pull request and skips it when every change since the revision last seen was made by one of the saved tokens' logins and explains the new `updated_at`. A change by anyone else, an unexplained update, a commit whose author is not linked to a GitHub account, or a timeline that cannot be read still notifies. Each skip is logged as `notification: skipped own update <url>`.
+
 ## Visual structure
 
 The native shell uses the GitHub Primer light palette: a quiet navigation rail with unread badges, and one rounded workspace with a page header, a toolbar, and the list. The design canvas that this layout follows is kept as a Claude Design artifact outside the repository.
